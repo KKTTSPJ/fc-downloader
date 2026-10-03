@@ -163,6 +163,18 @@ export function ProgressScreen() {
         } else if (cur.phase === 'downloading' && cur.activeFiles?.length) {
           const fs = cur.activeFiles
           detail = fs.slice(0, 2).join(', ') + (fs.length > 2 ? ` +${fs.length - 2}` : '')
+        } else if (cur.phase === 'counting' && cur.counting) {
+          // e.g. "Name — クリエイター 3/12 · ページ 120/480" so a long count
+          // visibly advances (page total omitted when the site can't tell).
+          const c = cur.counting
+          const pages =
+            c.pagesDone > 0 || c.pagesTotal > 0
+              ? `${L.countPage} ${c.pagesDone}${c.pagesTotal > 0 ? `/${c.pagesTotal}` : ''}`
+              : ''
+          const where = [`${L.countCreator} ${c.creatorIndex}/${c.creatorTotal}`, pages]
+            .filter(Boolean)
+            .join(' · ')
+          detail = [cur.creatorName, where].filter(Boolean).join(' — ')
         } else {
           const post = cur.postTitle || (cur.postId ? `#${cur.postId}` : '')
           detail = [cur.creatorName, post].filter(Boolean).join(' — ')

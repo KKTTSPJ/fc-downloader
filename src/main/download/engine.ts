@@ -77,6 +77,7 @@ export class DownloadEngine {
       postId: this.cur.postId,
       postTitle: this.cur.postTitle,
       activeFiles: downloading ? [...this.activeFiles] : undefined,
+      counting: this.cur.counting,
       retry: this.cur.retry
     }
     cb.onProgress({ ...this.progress })
@@ -104,6 +105,16 @@ export class DownloadEngine {
         this.cur.retry = notice
         this.progress.rateLimited = true // sticky: surfaces "access-limited" at the end
         this.emit(cb)
+      },
+      // Listing-page progress from countPosts, shown as "page N/M" so a long
+      // count visibly advances. Ignored outside a creator's count (e.g. the
+      // listCreators call above also reports progress through this hook).
+      onProgress: (done, total) => {
+        const counting = this.cur.counting
+        if (this.cur.phase !== 'counting' || !counting) return
+        this.cur.counting = { ...counting, pagesDone: done, pagesTotal: total }
+        this.cur.retry = undefined // a page came back, so no longer backing off
+        this.emit(cb)
       }
     })
     const service = getService(serviceId)
@@ -124,9 +135,18 @@ export class DownloadEngine {
       if (service.countPosts) {
         let total = 0
         let countable = true
-        for (const creatorId of creators) {
+        for (const [i, creatorId] of creators.entries()) {
           signal.throwIfAborted()
-          this.cur = { phase: 'counting', creatorName: nameById.get(creatorId) }
+          this.cur = {
+            phase: 'counting',
+            creatorName: nameById.get(creatorId),
+            counting: {
+              creatorIndex: i + 1,
+              creatorTotal: creators.length,
+              pagesDone: 0,
+              pagesTotal: 0
+            }
+          }
           this.emit(cb)
           try {
             total += await service.countPosts(ctx, creatorId)
@@ -144,6 +164,9 @@ export class DownloadEngine {
 
       for (const creatorId of creators) {
         signal.throwIfAborted()
+        // Leave the counting line behind while the first post is fetched.
+        this.cur = { phase: 'scanning', creatorName: nameById.get(creatorId) }
+        this.emit(cb)
         // Fetch the creator's avatar once per run so the library can show it.
         const avatarUrl = await ensureCreatorAvatar(
           serviceId,

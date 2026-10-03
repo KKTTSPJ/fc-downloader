@@ -178,6 +178,7 @@ export const cienService: Service = {
       const fresh = parseArticleIds(html).filter((id) => !seen.has(id))
       if (fresh.length === 0) return seen.size
       fresh.forEach((id) => seen.add(id))
+      ctx.progress?.(page, 0) // page count isn't known up front
     }
     return seen.size
   },

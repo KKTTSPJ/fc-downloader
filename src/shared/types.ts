@@ -126,6 +126,15 @@ export interface DownloadActivity {
   postTitle?: string
   /** Files currently being fetched (in-flight downloads). */
   activeFiles?: string[]
+  /** While counting: which creator of the run is being counted, and how far
+   *  through its listing pages. `pagesTotal` is 0 when the service can't tell
+   *  the page count up front (then only `pagesDone` is meaningful). */
+  counting?: {
+    creatorIndex: number
+    creatorTotal: number
+    pagesDone: number
+    pagesTotal: number
+  }
   /** Present while backing off before a retry (e.g. after an HTTP 429). Lets
    *  the UI show "rate-limited, retrying in Ns" instead of looking stuck. */
   retry?: {
