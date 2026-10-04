@@ -69,7 +69,7 @@ export const LANG: Record<Lang, Dict> = {
     filesUnit: 'ファイル',
     dupSkipped: '件は取得済みのためスキップ',
     startDownload: '一斉ダウンロード開始',
-    startDownloadSelected: '選択数 {n}人',
+    startDownloadSelected: '{n}人を選択中',
     loginRequired: 'ログインが必要です',
     noActiveDownload: '進行中のダウンロードはありません',
     downloading: 'ダウンロード中',
