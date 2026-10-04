@@ -18,6 +18,7 @@ import {
   extractPageUrls,
   extractRawPost,
   normalizePost,
+  type FanboxListingItem,
   type RawFollowedCreator,
   type RawSupportingPlan
 } from './normalize'
@@ -108,35 +109,19 @@ export const fanboxService: Service = {
   },
 
   async *listPosts(ctx: ServiceContext, creatorId: string): AsyncIterable<Post> {
-    // Cursor pagination: post.paginateCreator gives the page URLs, each page a
-    // list of post summaries. FANBOX moved both bodies from bare arrays into
-    // wrapper objects (`{ pageUrls }`, `{ posts }`); extractPageUrls/Items
-    // accept both shapes (see normalize.ts).
-    let pageUrls: string[]
-    try {
-      const pag = await ctx.fetchJson<{ body?: unknown }>(
-        `${API}/post.paginateCreator?creatorId=${encodeURIComponent(creatorId)}`,
-        { headers: apiHeaders }
-      )
-      pageUrls = extractPageUrls(pag.body)
-    } catch (err) {
-      ctx.log('error', `post.paginateCreator failed for ${creatorId}`, err)
-      return
-    }
-    for (const pageUrl of pageUrls) {
-      ctx.signal.throwIfAborted()
-      let items: Array<{ id: string }>
-      try {
-        const page = await ctx.fetchJson<{ body?: unknown }>(pageUrl, {
-          headers: apiHeaders
-        })
-        items = extractPageItems(page.body)
-      } catch (err) {
-        ctx.log('warn', `post.listCreator page failed for ${creatorId}`, err)
-        continue
-      }
+    for await (const items of listingPages(ctx, creatorId)) {
       for (const item of items) {
         ctx.signal.throwIfAborted()
+        // Not covered by the viewer's plan: post.info would return a null body
+        // (nothing to download), so don't spend a throttled request on it.
+        if (item.isRestricted === true) continue
+        // Already fully downloaded for this run's kinds? Skip the post.info
+        // call and let the engine skip it from the ledger.
+        const stub = ctx.completedPostStub?.(creatorId, item.id)
+        if (stub) {
+          yield stub
+          continue
+        }
         const post = await fetchPostDetail(ctx, item.id)
         if (post) yield post
       }
@@ -144,27 +129,78 @@ export const fanboxService: Service = {
   },
 
   async countPosts(ctx: ServiceContext, creatorId: string): Promise<number> {
-    // Sum the page-list lengths (post summaries) WITHOUT fetching post.info per
-    // post — the same pages listPosts walks, just counted.
+    // Walk the listing pages (post summaries) WITHOUT fetching post.info per
+    // post, and keep the result so the following listPosts on this context
+    // doesn't walk the same pages a second time.
     const pag = await ctx.fetchJson<{ body?: unknown }>(
       `${API}/post.paginateCreator?creatorId=${encodeURIComponent(creatorId)}`,
       { headers: apiHeaders }
     )
-    const pageUrls = extractPageUrls(pag.body)
-    let n = 0
-    for (const pageUrl of pageUrls) {
+    const items: FanboxListingItem[] = []
+    for (const pageUrl of extractPageUrls(pag.body)) {
       ctx.signal.throwIfAborted()
       const page = await ctx.fetchJson<{ body?: unknown }>(pageUrl, {
         headers: apiHeaders
       })
-      n += extractPageItems(page.body).length
+      items.push(...extractPageItems(page.body))
     }
-    return n
+    let cache = listingCache.get(ctx)
+    if (!cache) listingCache.set(ctx, (cache = new Map()))
+    cache.set(creatorId, items)
+    // Restricted posts are never yielded by listPosts, so leave them out of the
+    // total too (otherwise the progress bar can't reach the end).
+    return items.filter((it) => it.isRestricted !== true).length
   },
 
   async resolvePost(_ctx: ServiceContext, post: Post): Promise<Post> {
     // listPosts already fetches full detail per post.
     return post
+  }
+}
+
+/**
+ * Listing items collected by countPosts, per context and creator, handed to the
+ * next listPosts for that creator (one-shot) instead of re-walking the pages.
+ * Keyed by context so each download run starts from a fresh listing.
+ */
+const listingCache = new WeakMap<ServiceContext, Map<string, FanboxListingItem[]>>()
+
+/**
+ * The creator's post summaries, one page at a time. Cursor pagination:
+ * post.paginateCreator gives the page URLs, each page a list of summaries.
+ * FANBOX moved both bodies from bare arrays into wrapper objects
+ * (`{ pageUrls }`, `{ posts }`); extractPageUrls/Items accept both shapes.
+ */
+async function* listingPages(
+  ctx: ServiceContext,
+  creatorId: string
+): AsyncIterable<FanboxListingItem[]> {
+  const cache = listingCache.get(ctx)
+  const cached = cache?.get(creatorId)
+  if (cached) {
+    cache?.delete(creatorId)
+    yield cached
+    return
+  }
+  let pageUrls: string[]
+  try {
+    const pag = await ctx.fetchJson<{ body?: unknown }>(
+      `${API}/post.paginateCreator?creatorId=${encodeURIComponent(creatorId)}`,
+      { headers: apiHeaders }
+    )
+    pageUrls = extractPageUrls(pag.body)
+  } catch (err) {
+    ctx.log('error', `post.paginateCreator failed for ${creatorId}`, err)
+    return
+  }
+  for (const pageUrl of pageUrls) {
+    ctx.signal.throwIfAborted()
+    try {
+      const page = await ctx.fetchJson<{ body?: unknown }>(pageUrl, { headers: apiHeaders })
+      yield extractPageItems(page.body)
+    } catch (err) {
+      ctx.log('warn', `post.listCreator page failed for ${creatorId}`, err)
+    }
   }
 }
 

@@ -28,6 +28,7 @@ import {
   upsertPost
 } from '@main/storage/db'
 import { MAX_RETRIES, backoffDelayMs, isRetriableError, sleep } from './retry'
+import { prefetchOne } from './prefetch'
 
 export interface DownloadCallbacks {
   onProgress(progress: DownloadProgress): void
@@ -156,9 +157,10 @@ export class DownloadEngine {
           return undefined
         })
         const creatorName = nameById.get(creatorId)
-        for await (const listed of service.listPosts(ctx, creatorId)) {
+        const resolve = (p: Post): Promise<Post> =>
+          service.resolvePost ? service.resolvePost(ctx, p) : Promise.resolve(p)
+        for await (const post of prefetchOne(service.listPosts(ctx, creatorId), resolve)) {
           signal.throwIfAborted()
-          const post = service.resolvePost ? await service.resolvePost(ctx, listed) : listed
 
           // Surface the post we're now on (covers skips too), so the activity
           // line ticks through the walk instead of looking frozen.

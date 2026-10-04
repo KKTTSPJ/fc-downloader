@@ -88,10 +88,22 @@ export function extractPageUrls(body: unknown): string[] {
  * A paginate page body: the post summaries for that page. Likewise moved from
  * `body: [ {id}, ... ]` to `body: { posts: [ {id}, ... ] }`; accept both.
  */
-export function extractPageItems(body: unknown): Array<{ id: string }> {
+export function extractPageItems(body: unknown): FanboxListingItem[] {
   const arr = Array.isArray(body) ? body : (body as { posts?: unknown } | null)?.posts
   if (!Array.isArray(arr)) return []
-  return arr.filter((it): it is { id: string } => !!it && typeof (it as { id?: unknown }).id === 'string')
+  return arr.filter(
+    (it): it is FanboxListingItem => !!it && typeof (it as { id?: unknown }).id === 'string'
+  )
+}
+
+/**
+ * VERIFY: subset of a paginate-page post summary. `isRestricted` is true when
+ * the viewer's plan doesn't cover the post — its `post.info` body is then null
+ * (normalizePost returns null), so the detail fetch can be skipped entirely.
+ */
+export interface FanboxListingItem {
+  id: string
+  isRestricted?: boolean
 }
 
 /** VERIFY: subset of the api.fanbox.cc `post.info` response body. */
