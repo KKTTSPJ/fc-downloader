@@ -29,6 +29,7 @@ import {
 } from '@main/storage/db'
 import { MAX_RETRIES, backoffDelayMs, isRetriableError, sleep } from './retry'
 import { prefetchOne } from './prefetch'
+import { maybeInPeriod, periodToMs } from '@shared/period'
 
 export interface DownloadCallbacks {
   onProgress(progress: DownloadProgress): void
@@ -96,11 +97,13 @@ export class DownloadEngine {
     this.activeFiles.clear()
     this.cur = { phase: 'counting' }
     const signal = this.abort.signal
+    const period = periodToMs(options.period)
     // On skip-existing runs, give the context the ledger-backed skip helper so
     // adapters can avoid a per-post detail fetch for posts already downloaded.
     // onRetry surfaces request backoff (e.g. HTTP 429) in the activity line.
     const ctx = createServiceContext(serviceId, signal, {
       includeKinds: options.skipExisting ? options.includeKinds : undefined,
+      period,
       onRetry: (notice) => {
         this.cur.retry = notice
         this.progress.rateLimited = true // sticky: surfaces "access-limited" at the end
@@ -184,6 +187,14 @@ export class DownloadEngine {
           service.resolvePost ? service.resolvePost(ctx, p) : Promise.resolve(p)
         for await (const post of prefetchOne(service.listPosts(ctx, creatorId), resolve)) {
           signal.throwIfAborted()
+
+          // Outside the run's period: nothing to do. Count it as handled so the
+          // bar still reaches the end when the adapter couldn't pre-filter it.
+          if (!maybeInPeriod(post.postedAt, period)) {
+            this.progress.postsCompleted += 1
+            this.emit(cb)
+            continue
+          }
 
           // Surface the post we're now on (covers skips too), so the activity
           // line ticks through the walk instead of looking frozen.

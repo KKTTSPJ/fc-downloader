@@ -34,6 +34,7 @@ import { LibraryScreen } from './screens/LibraryScreen'
 import { FavoritesScreen } from './screens/FavoritesScreen'
 import { PostDetail } from './screens/PostDetail'
 import { SettingsScreen } from './screens/SettingsScreen'
+import { periodRangeFromPref } from '@shared/period'
 
 const PREFS_KEY = 'fc_prefs'
 const FAVS_KEY = 'fc_favs'
@@ -513,7 +514,13 @@ export function App() {
     if (includeKinds.length === 0) return null
     const saved = creatorSel[svcId]
     if (saved && saved.length === 0) return null
-    return { creatorIds: saved ?? [], skipExisting: downloadPrefs.skipDup, concurrency, includeKinds }
+    return {
+      creatorIds: saved ?? [],
+      skipExisting: downloadPrefs.skipDup,
+      concurrency,
+      includeKinds,
+      period: periodRangeFromPref(downloadPrefs.period, new Date())
+    }
   }
 
   // Enqueue a single service's run (main-process queue serializes services).

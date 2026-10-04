@@ -5,6 +5,7 @@
  * implementation and registering it, with no changes elsewhere.
  */
 import type { Creator, Post, ServiceId } from '@shared/types'
+import type { PeriodMs } from '@shared/period'
 
 /** One entry from a service's recent/home feed, for the "new posts" indicator. */
 export interface RecentPost {
@@ -42,6 +43,12 @@ export interface ServiceContext {
    * when the detail must be fetched. Absent on non-download contexts.
    */
   completedPostStub?(creatorId: string, postId: string): Post | null
+  /**
+   * The run's publish-date period (epoch ms), if any. The engine drops posts
+   * outside it regardless; an adapter whose listing carries publish dates can
+   * use it to skip detail fetches and stop paging early. Absent = all posts.
+   */
+  period?: PeriodMs
 }
 
 export interface Service {

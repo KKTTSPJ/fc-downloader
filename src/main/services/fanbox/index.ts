@@ -12,6 +12,7 @@
  */
 import type { Creator, Post } from '@shared/types'
 import type { RecentPost, Service, ServiceContext } from '../types'
+import { maybeInPeriod, periodPosition } from '@shared/period'
 import {
   collectDownloadableCreators,
   extractPageItems,
@@ -112,9 +113,7 @@ export const fanboxService: Service = {
     for await (const items of listingPages(ctx, creatorId)) {
       for (const item of items) {
         ctx.signal.throwIfAborted()
-        // Not covered by the viewer's plan: post.info would return a null body
-        // (nothing to download), so don't spend a throttled request on it.
-        if (item.isRestricted === true) continue
+        if (!wanted(ctx, item)) continue
         // Already fully downloaded for this run's kinds? Skip the post.info
         // call and let the engine skip it from the ledger.
         const stub = ctx.completedPostStub?.(creatorId, item.id)
@@ -144,15 +143,16 @@ export const fanboxService: Service = {
       const page = await ctx.fetchJson<{ body?: unknown }>(pageUrl, {
         headers: apiHeaders
       })
-      items.push(...extractPageItems(page.body))
+      const pageItems = extractPageItems(page.body)
+      items.push(...pageItems)
       ctx.progress?.(i + 1, pageUrls.length)
+      if (pastPeriod(ctx, pageItems)) break
     }
     let cache = listingCache.get(ctx)
     if (!cache) listingCache.set(ctx, (cache = new Map()))
     cache.set(creatorId, items)
-    // Restricted posts are never yielded by listPosts, so leave them out of the
-    // total too (otherwise the progress bar can't reach the end).
-    return items.filter((it) => it.isRestricted !== true).length
+    // Count only what listPosts will yield (otherwise the bar can't reach the end).
+    return items.filter((it) => wanted(ctx, it)).length
   },
 
   async resolvePost(_ctx: ServiceContext, post: Post): Promise<Post> {
@@ -200,11 +200,32 @@ async function* listingPages(
     ctx.signal.throwIfAborted()
     try {
       const page = await ctx.fetchJson<{ body?: unknown }>(pageUrl, { headers: apiHeaders })
-      yield extractPageItems(page.body)
+      const items = extractPageItems(page.body)
+      yield items
+      if (pastPeriod(ctx, items)) return
     } catch (err) {
       ctx.log('warn', `post.listCreator page failed for ${creatorId}`, err)
     }
   }
+}
+
+/**
+ * Whether a listed post is worth a post.info fetch: not restricted (the viewer's
+ * plan doesn't cover it, so its body is null — nothing to download) and not
+ * known to fall outside the run's period.
+ */
+function wanted(ctx: ServiceContext, item: FanboxListingItem): boolean {
+  return item.isRestricted !== true && maybeInPeriod(item.publishedDatetime, ctx.period)
+}
+
+/**
+ * The listing is newest-first, so once a whole page is older than the period's
+ * start, later pages are too: stop paging. A whole page (rather than the first
+ * old post) keeps a stray out-of-order entry from ending the walk early.
+ */
+function pastPeriod(ctx: ServiceContext, items: FanboxListingItem[]): boolean {
+  if (ctx.period?.from === undefined || items.length === 0) return false
+  return items.every((it) => periodPosition(it.publishedDatetime, ctx.period) === 'before')
 }
 
 /** VERIFY: subset of a post.listHome item. */

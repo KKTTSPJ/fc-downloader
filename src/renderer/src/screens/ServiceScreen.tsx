@@ -6,6 +6,7 @@ import { FC } from '../design/data'
 import { Icon } from '../design/icons'
 import { Btn, ServiceMark } from '../design/primitives'
 import { useApp } from '../design/context'
+import { DEFAULT_PERIOD_PREF, periodRangeFromPref, type PeriodPref } from '@shared/period'
 
 /** Public web page for a creator, for jumping the embedded browser to it.
  *  Patreon's creatorId is a campaign id with no clean public URL → not linkable. */
@@ -520,6 +521,114 @@ function SectionLabel({ children, action }: { children: React.ReactNode; action?
   )
 }
 
+/**
+ * Publish-date period for the run: all posts, the last N days, or a date range
+ * (either end optional). The days field commits on blur so it can be cleared
+ * while typing; an empty or invalid entry reverts.
+ */
+function PeriodPicker({
+  value,
+  onChange,
+  L
+}: {
+  value: PeriodPref
+  onChange: (next: PeriodPref) => void
+  L: Dict
+}) {
+  const [daysDraft, setDaysDraft] = useState<string | null>(null)
+  const commitDays = (): void => {
+    if (daysDraft === null) return
+    setDaysDraft(null)
+    const n = Math.floor(Number(daysDraft))
+    if (Number.isFinite(n) && n >= 1) onChange({ ...value, days: n })
+  }
+  const modes: [PeriodPref['mode'], string][] = [
+    ['all', L.periodAll],
+    ['recent', L.periodRecent],
+    ['range', L.periodRange]
+  ]
+  const field: React.CSSProperties = {
+    fontFamily: 'var(--mono)',
+    fontSize: 12,
+    padding: '5px 8px',
+    borderRadius: 7,
+    border: '1px solid var(--border)',
+    background: 'var(--surface-2)',
+    color: 'var(--text)',
+    colorScheme: 'inherit'
+  }
+  const active = value.mode !== 'all'
+  return (
+    <div style={{ padding: '9px 4px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
+        <Icon name="clock" size={16} style={{ color: active ? 'var(--accent)' : 'var(--text-3)' }} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{L.period}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>{L.periodHint}</div>
+        </div>
+      </div>
+      <div style={{ marginLeft: 27, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', background: 'var(--surface-2)', borderRadius: 8, padding: 3 }}>
+          {modes.map(([m, lbl]) => (
+            <button
+              key={m}
+              onClick={() => onChange({ ...value, mode: m })}
+              style={{
+                flex: 1,
+                padding: '5px 0',
+                borderRadius: 6,
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                fontFamily: 'inherit',
+                background: value.mode === m ? 'var(--surface)' : 'transparent',
+                color: value.mode === m ? 'var(--accent)' : 'var(--text-3)',
+                boxShadow: value.mode === m ? 'var(--shadow-sm)' : 'none'
+              }}
+            >
+              {lbl}
+            </button>
+          ))}
+        </div>
+        {value.mode === 'recent' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-2)' }}>
+            <input
+              type="number"
+              min={1}
+              value={daysDraft ?? String(value.days)}
+              onChange={(e) => setDaysDraft(e.target.value)}
+              onBlur={commitDays}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.currentTarget.blur()
+              }}
+              style={{ ...field, width: 70, textAlign: 'right' }}
+            />
+            {L.periodDaysSuffix}
+          </div>
+        )}
+        {value.mode === 'range' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-3)' }}>
+            <input
+              type="date"
+              value={value.from}
+              onChange={(e) => onChange({ ...value, from: e.target.value })}
+              style={field}
+            />
+            〜
+            <input
+              type="date"
+              value={value.to}
+              onChange={(e) => onChange({ ...value, to: e.target.value })}
+              style={field}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function OptToggle({
   on,
   onClick,
@@ -603,6 +712,7 @@ function SettingsPanel({
   const prefs = app.state.downloadPrefs
   const types: Record<PostType, boolean> = { image: prefs.image, video: prefs.video, file: prefs.file }
   const skipDup = prefs.skipDup
+  const period = prefs.period ?? DEFAULT_PERIOD_PREF
 
   // Creator selection is persisted per service (survives switches/launches).
   // Absent saved state = all selected by default; saved state is intersected
@@ -675,7 +785,8 @@ function SettingsPanel({
       creatorIds: [...sel],
       skipExisting: skipDup,
       concurrency: app.state.concurrency,
-      includeKinds
+      includeKinds,
+      period: periodRangeFromPref(period, new Date())
     })
   }
 
@@ -886,6 +997,11 @@ function SettingsPanel({
               icon="refresh"
               label={L.skipDuplicates}
               hint={L.skipDupHint}
+            />
+            <PeriodPicker
+              value={period}
+              onChange={(next) => app.actions.setDownloadPrefs({ period: next })}
+              L={L}
             />
           </div>
         </div>
