@@ -84,8 +84,10 @@ export interface Service {
   /**
    * Cheaply count a creator's posts WITHOUT fetching per-post detail, so the
    * download engine can show a determinate progress total up front. Should only
-   * walk the listing pages (post ids), not resolve each post. Optional: when
-   * absent the engine falls back to an indeterminate progress bar.
+   * walk the listing pages (post ids), not resolve each post. Report pages
+   * walked via `ctx.progress(done, total)` (total 0 when unknown) so the UI can
+   * show the count advancing. Optional: when absent the engine falls back to an
+   * indeterminate progress bar.
    */
   countPosts?(ctx: ServiceContext, creatorId: string): Promise<number>
 

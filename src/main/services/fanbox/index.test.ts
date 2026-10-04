@@ -111,6 +111,18 @@ describe('fanboxService listing', () => {
     expect(hits).toContain(PAGE1)
   })
 
+  it('reports listing-page progress while counting', async () => {
+    const { ctx } = fakeCtx()
+    const calls: Array<[number, number]> = []
+    ctx.progress = (done, total) => calls.push([done, total])
+    await fanboxService.countPosts!(ctx, 'c1')
+    expect(calls).toEqual([
+      [0, 2],
+      [1, 2],
+      [2, 2]
+    ])
+  })
+
   it('yields the ledger stub instead of fetching an already-downloaded post', async () => {
     const { ctx, hits } = fakeCtx({ completed: ['101'] })
     const posts = await collect(fanboxService.listPosts(ctx, 'c1'))

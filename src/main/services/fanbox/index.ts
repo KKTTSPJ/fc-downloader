@@ -136,13 +136,16 @@ export const fanboxService: Service = {
       `${API}/post.paginateCreator?creatorId=${encodeURIComponent(creatorId)}`,
       { headers: apiHeaders }
     )
+    const pageUrls = extractPageUrls(pag.body)
     const items: FanboxListingItem[] = []
-    for (const pageUrl of extractPageUrls(pag.body)) {
+    ctx.progress?.(0, pageUrls.length)
+    for (const [i, pageUrl] of pageUrls.entries()) {
       ctx.signal.throwIfAborted()
       const page = await ctx.fetchJson<{ body?: unknown }>(pageUrl, {
         headers: apiHeaders
       })
       items.push(...extractPageItems(page.body))
+      ctx.progress?.(i + 1, pageUrls.length)
     }
     let cache = listingCache.get(ctx)
     if (!cache) listingCache.set(ctx, (cache = new Map()))
