@@ -147,6 +147,33 @@ describe('completedPostStub (skip the detail fetch for already-downloaded posts)
   })
 })
 
+describe('posts with nothing to download for the scope', () => {
+  const id = ['fantia', 'c1', 'p2'] as const
+  const textOnly = (): Post => ({ ...makePost(), postId: 'p2', title: 'text-only', files: [] })
+
+  it('records a text-only post as complete so re-runs skip its detail fetch', () => {
+    const post = textOnly()
+    expect(isPostComplete(post, ['image'])).toBe(false) // never seen -> fetch + record
+    upsertPost(post, '/disk/p2')
+    refreshPostCompletion(post, ['image'])
+    expect(isPostComplete(post, ['image'])).toBe(true)
+    const stub = completedPostStub(...id, ['image'])
+    expect(stub).not.toBeNull()
+    expect(stub!.files).toEqual([])
+    expect(isPostComplete(stub!, ['image'])).toBe(true) // engine skips it
+  })
+
+  it('treats a post whose files are all excluded kinds the same way', () => {
+    const post: Post = { ...makePost(), files: [makePost().files[1]] } // video only
+    upsertPost(post, '/disk/p1')
+    refreshPostCompletion(post, ['image'])
+    expect(completedPostStub('fantia', 'c1', 'p1', ['image'])).not.toBeNull()
+    // Widening to video must fetch again: the video was never downloaded.
+    expect(completedPostStub('fantia', 'c1', 'p1', ['image', 'video'])).toBeNull()
+    expect(isPostComplete(post, ['image', 'video'])).toBe(false)
+  })
+})
+
 describe('listPosts', () => {
   it('returns empty when nothing is recorded', () => {
     expect(listPosts()).toEqual([])
