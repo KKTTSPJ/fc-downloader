@@ -657,6 +657,13 @@ function SettingsPanel({
   }
   const anyType = types.image || types.video || types.file
   const canStart = loggedIn && anyType && sel.size > 0
+  // Show how many creators the run covers: every checked creator across all
+  // tabs (the tier tabs only filter the list, they don't narrow the run).
+  const startLabel = !loggedIn
+    ? L.loginRequired
+    : creators.length > 0
+      ? `${L.startDownload} (${L.startDownloadSelected.replace('{n}', String(sel.size))})`
+      : L.startDownload
 
   const start = (): void => {
     if (!canStart) return
@@ -907,7 +914,7 @@ function SettingsPanel({
           }}
         >
           <Icon name="download" size={18} strokeWidth={2.2} />
-          {loggedIn ? L.startDownload : L.loginRequired}
+          {startLabel}
         </button>
       </div>
     </div>
