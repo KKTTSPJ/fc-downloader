@@ -5,6 +5,7 @@ import { initDb, closeDb } from './storage/db'
 import { getSettings, initSettings, updateSettings } from './storage/settings'
 import { registerFcfileHandler, registerFcfileScheme } from './protocol/fcfile'
 import { registerFciconHandler, registerFciconScheme } from './protocol/fcicon'
+import { keepPopupInApp } from './webview/popup'
 
 // Privileged-scheme registration must happen before the app is ready.
 registerFcfileScheme()
@@ -107,13 +108,12 @@ function createWindow(): void {
   // Same for links inside the embedded service <webview>s (e.g. a creator's
   // X / social link). A target=_blank / window.open there otherwise does
   // nothing — the popup is swallowed — so route it to the system browser.
-  // Regular in-webview navigation (logins, OAuth redirects, browsing) is left
-  // untouched so those flows keep working.
+  // Exception: sign-in popups (e.g. Patreon's "Continue with Google") and
+  // same-site scripted popup windows open in-app on the guest's session, so the
+  // login lands in the service's cookie jar and can report back to its opener
+  // (see keepPopupInApp). Regular in-webview navigation is left untouched.
   mainWindow.webContents.on('did-attach-webview', (_event, guest) => {
-    guest.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
-      return { action: 'deny' }
-    })
+    routeGuestPopups(guest)
     // Give the guest page mouse back/forward (see WEBVIEW_MOUSE_NAV).
     guest.on('dom-ready', () => {
       void guest.executeJavaScript(WEBVIEW_MOUSE_NAV, true).catch(() => {
@@ -138,6 +138,35 @@ function createWindow(): void {
   } else {
     void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
+}
+
+/**
+ * Window-open policy for a service guest (and for in-app popups it opens):
+ * sign-in popups (and same-site scripted popup windows) open in-app on the
+ * opener's session; anything else http(s) goes to the system browser.
+ */
+function routeGuestPopups(contents: Electron.WebContents): void {
+  contents.setWindowOpenHandler(({ url, disposition }) => {
+    if (keepPopupInApp(contents.getURL(), url, disposition)) {
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: {
+          width: 520,
+          height: 720,
+          autoHideMenuBar: true,
+          webPreferences: {
+            session: contents.session,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true
+          }
+        }
+      }
+    }
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  contents.on('did-create-window', (win) => routeGuestPopups(win.webContents))
 }
 
 app.whenReady().then(() => {
