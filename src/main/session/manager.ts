@@ -56,6 +56,14 @@ export async function requestFor(
       session: s,
       useSessionCookies: true
     })
+    // Settle exactly once and drop the signal listener (a run's signal outlives
+    // thousands of requests).
+    const onAbort = (): void => request.abort()
+    const done = (): void => init.signal?.removeEventListener('abort', onAbort)
+    const fail = (err: unknown): void => {
+      done()
+      reject(err)
+    }
 
     // Reasonable defaults so endpoints treat us like the embedded browser.
     request.setHeader('Accept', 'application/json, text/plain, */*')
@@ -71,13 +79,19 @@ export async function requestFor(
         reject(new DOMException('Aborted', 'AbortError'))
         return
       }
-      init.signal.addEventListener('abort', () => request.abort(), { once: true })
+      init.signal.addEventListener('abort', onAbort, { once: true })
     }
+    // Electron reports an aborted request only through an 'abort' event (no
+    // 'error', no 'end'), so without this a request cut off by cancellation
+    // never settles — and the cancelled run never finishes, leaving the next
+    // queued run stuck behind it.
+    request.on('abort', () => fail(new DOMException('Aborted', 'AbortError')))
 
     const chunks: Buffer[] = []
     request.on('response', (response) => {
       response.on('data', (chunk) => chunks.push(Buffer.from(chunk)))
       response.on('end', () => {
+        done()
         const buf = Buffer.concat(chunks)
         resolve({
           status: response.statusCode,
@@ -87,9 +101,9 @@ export async function requestFor(
           json: async <T,>() => JSON.parse(buf.toString('utf-8')) as T
         })
       })
-      response.on('error', reject)
+      response.on('error', fail)
     })
-    request.on('error', reject)
+    request.on('error', fail)
 
     if (init.body) request.write(init.body as string)
     request.end()
