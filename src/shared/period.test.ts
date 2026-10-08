@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_PERIOD_PREF,
+  MAX_PERIOD_DAYS,
+  isPeriodPrefIncomplete,
   maybeInPeriod,
   periodPosition,
   periodRangeFromPref,
@@ -18,6 +20,13 @@ describe('periodRangeFromPref', () => {
   it('makes "recent" relative to now', () => {
     const r = periodRangeFromPref({ ...DEFAULT_PERIOD_PREF, mode: 'recent', days: 7 }, now)
     expect(r).toEqual({ from: '2026-09-27T12:00:00.000Z' })
+  })
+
+  it('caps the day count so a huge entry stays a valid date', () => {
+    const r = periodRangeFromPref({ ...DEFAULT_PERIOD_PREF, mode: 'recent', days: 1e12 }, now)
+    expect(r).toEqual({
+      from: new Date(now.getTime() - MAX_PERIOD_DAYS * 24 * 60 * 60 * 1000).toISOString()
+    })
   })
 
   it('ignores an invalid day count', () => {
@@ -51,6 +60,20 @@ describe('periodRangeFromPref', () => {
       to: new Date(2026, 0, 13).toISOString()
     })
     expect(periodRangeFromPref({ ...DEFAULT_PERIOD_PREF, mode: 'range' }, now)).toBeUndefined()
+  })
+})
+
+describe('isPeriodPrefIncomplete', () => {
+  it('flags only a range with neither date set', () => {
+    expect(isPeriodPrefIncomplete({ ...DEFAULT_PERIOD_PREF, mode: 'range' })).toBe(true)
+    expect(isPeriodPrefIncomplete({ ...DEFAULT_PERIOD_PREF, mode: 'range', from: 'bad' })).toBe(
+      true
+    )
+    expect(
+      isPeriodPrefIncomplete({ ...DEFAULT_PERIOD_PREF, mode: 'range', to: '2026-01-10' })
+    ).toBe(false)
+    expect(isPeriodPrefIncomplete(DEFAULT_PERIOD_PREF)).toBe(false)
+    expect(isPeriodPrefIncomplete(undefined)).toBe(false)
   })
 })
 

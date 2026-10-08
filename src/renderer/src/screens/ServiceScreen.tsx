@@ -6,7 +6,13 @@ import { FC } from '../design/data'
 import { Icon } from '../design/icons'
 import { Btn, ServiceMark } from '../design/primitives'
 import { useApp } from '../design/context'
-import { DEFAULT_PERIOD_PREF, periodRangeFromPref, type PeriodPref } from '@shared/period'
+import {
+  DEFAULT_PERIOD_PREF,
+  MAX_PERIOD_DAYS,
+  isPeriodPrefIncomplete,
+  periodRangeFromPref,
+  type PeriodPref
+} from '@shared/period'
 
 /** Public web page for a creator, for jumping the embedded browser to it.
  *  Patreon's creatorId is a campaign id with no clean public URL → not linkable. */
@@ -540,7 +546,7 @@ function PeriodPicker({
     if (daysDraft === null) return
     setDaysDraft(null)
     const n = Math.floor(Number(daysDraft))
-    if (Number.isFinite(n) && n >= 1) onChange({ ...value, days: n })
+    if (Number.isFinite(n) && n >= 1) onChange({ ...value, days: Math.min(n, MAX_PERIOD_DAYS) })
   }
   const modes: [PeriodPref['mode'], string][] = [
     ['all', L.periodAll],
@@ -596,6 +602,7 @@ function PeriodPicker({
             <input
               type="number"
               min={1}
+              max={MAX_PERIOD_DAYS}
               value={daysDraft ?? String(value.days)}
               onChange={(e) => setDaysDraft(e.target.value)}
               onBlur={commitDays}
@@ -623,6 +630,9 @@ function PeriodPicker({
               style={field}
             />
           </div>
+        )}
+        {isPeriodPrefIncomplete(value) && (
+          <div style={{ fontSize: 11, color: 'var(--warn)' }}>{L.periodRangeEmpty}</div>
         )}
       </div>
     </div>
@@ -766,7 +776,7 @@ function SettingsPanel({
     persistSel(next)
   }
   const anyType = types.image || types.video || types.file
-  const canStart = loggedIn && anyType && sel.size > 0
+  const canStart = loggedIn && anyType && sel.size > 0 && !isPeriodPrefIncomplete(period)
   // Show how many creators the run covers: every checked creator across all
   // tabs (the tier tabs only filter the list, they don't narrow the run).
   const startLabel = !loggedIn

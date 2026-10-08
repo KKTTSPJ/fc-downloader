@@ -31,6 +31,9 @@ export interface PeriodMs {
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
+/** Upper bound for `recent` days (~10 years); keeps the date math in range. */
+export const MAX_PERIOD_DAYS = 3650
+
 /** Local midnight at the start of a "YYYY-MM-DD" date, or undefined. */
 function localMidnight(date: string, addDays = 0): Date | undefined {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
@@ -50,7 +53,8 @@ export function periodRangeFromPref(
   if (!pref || pref.mode === 'all') return undefined
   if (pref.mode === 'recent') {
     if (!Number.isFinite(pref.days) || pref.days < 1) return undefined
-    return { from: new Date(now.getTime() - Math.floor(pref.days) * DAY_MS).toISOString() }
+    const days = Math.min(Math.floor(pref.days), MAX_PERIOD_DAYS)
+    return { from: new Date(now.getTime() - days * DAY_MS).toISOString() }
   }
   // Dates entered in reverse order are taken as the same span.
   const [a, b] =
@@ -59,6 +63,14 @@ export function periodRangeFromPref(
   const to = localMidnight(b, 1)
   if (!from && !to) return undefined
   return { from: from?.toISOString(), to: to?.toISOString() }
+}
+
+/**
+ * A `range` with neither date set: it would silently mean "all posts", so the
+ * UI blocks starting a run with it and scheduled runs skip it.
+ */
+export function isPeriodPrefIncomplete(pref: PeriodPref | undefined): boolean {
+  return pref?.mode === 'range' && !localMidnight(pref.from) && !localMidnight(pref.to)
 }
 
 /** Parse a run's range into epoch ms (unparseable ends are dropped). */
