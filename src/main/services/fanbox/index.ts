@@ -194,6 +194,7 @@ async function* listingPages(
     pageUrls = extractPageUrls(pag.body)
   } catch (err) {
     ctx.log('error', `post.paginateCreator failed for ${creatorId}`, err)
+    ctx.markIncomplete?.()
     return
   }
   for (const pageUrl of pageUrls) {
@@ -205,6 +206,7 @@ async function* listingPages(
       if (pastPeriod(ctx, items)) return
     } catch (err) {
       ctx.log('warn', `post.listCreator page failed for ${creatorId}`, err)
+      ctx.markIncomplete?.()
     }
   }
 }
@@ -248,6 +250,7 @@ async function fetchPostDetail(ctx: ServiceContext, postId: string): Promise<Pos
     return raw ? normalizePost(raw) : null
   } catch (err) {
     ctx.log('warn', `post.info ${postId} failed`, err)
+    ctx.markIncomplete?.()
     return null
   }
 }

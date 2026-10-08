@@ -22,14 +22,22 @@ import { THUMBNAIL_WIDTH } from '@shared/constants'
 import { ensureCreatorAvatar } from './avatar'
 import {
   isFileDownloaded,
+  getSyncMark,
   isPostComplete,
   markFileDownloaded,
   refreshPostCompletion,
+  setSyncMark,
   upsertPost
 } from '@main/storage/db'
 import { MAX_RETRIES, backoffDelayMs, isRetriableError, sleep } from './retry'
 import { prefetchOne } from './prefetch'
-import { maybeInPeriod, periodToMs } from '@shared/period'
+import {
+  maybeInPeriod,
+  nextSyncMark,
+  periodToMs,
+  syncPeriod,
+  type PeriodMs
+} from '@shared/period'
 
 export interface DownloadCallbacks {
   onProgress(progress: DownloadProgress): void
@@ -97,13 +105,24 @@ export class DownloadEngine {
     this.activeFiles.clear()
     this.cur = { phase: 'counting' }
     const signal = this.abort.signal
-    const period = periodToMs(options.period)
+    const runPeriod = periodToMs(options.period)
+    const sinceSync = options.sinceLastSync === true
+    // The period for one creator: per-creator from its sync mark on "since last
+    // sync" runs (none = walk everything), else the run-wide period.
+    const periodFor = (creatorId: string): PeriodMs | undefined =>
+      sinceSync ? syncPeriod(getSyncMark(serviceId, creatorId, options.includeKinds)) : runPeriod
+    // Set by the adapter (ctx.markIncomplete) when it skips past a failed
+    // listing/detail fetch; reset per creator. Blocks advancing the sync mark.
+    let creatorIncomplete = false
     // On skip-existing runs, give the context the ledger-backed skip helper so
     // adapters can avoid a per-post detail fetch for posts already downloaded.
     // onRetry surfaces request backoff (e.g. HTTP 429) in the activity line.
     const ctx = createServiceContext(serviceId, signal, {
       includeKinds: options.skipExisting ? options.includeKinds : undefined,
-      period,
+      period: runPeriod,
+      onIncomplete: () => {
+        creatorIncomplete = true
+      },
       onRetry: (notice) => {
         this.cur.retry = notice
         this.progress.rateLimited = true // sticky: surfaces "access-limited" at the end
@@ -151,6 +170,7 @@ export class DownloadEngine {
             }
           }
           this.emit(cb)
+          ctx.period = periodFor(creatorId)
           try {
             total += await service.countPosts(ctx, creatorId)
           } catch (err) {
@@ -183,10 +203,18 @@ export class DownloadEngine {
           return undefined
         })
         const creatorName = nameById.get(creatorId)
+        const period = periodFor(creatorId)
+        ctx.period = period
+        creatorIncomplete = false
+        const failedBefore = this.progress.failed
+        let newestSeen: string | undefined
         const resolve = (p: Post): Promise<Post> =>
           service.resolvePost ? service.resolvePost(ctx, p) : Promise.resolve(p)
         for await (const post of prefetchOne(service.listPosts(ctx, creatorId), resolve)) {
           signal.throwIfAborted()
+          if (!newestSeen || Date.parse(post.postedAt) > Date.parse(newestSeen)) {
+            newestSeen = post.postedAt
+          }
 
           // Outside the run's period: nothing to do. Count it as handled so the
           // bar still reaches the end when the adapter couldn't pre-filter it.
@@ -216,6 +244,18 @@ export class DownloadEngine {
           this.progress.postsCompleted += 1
           this.emit(cb)
         }
+
+        // Advance the creator's sync mark only after a walk that reached back to
+        // the previous mark (a full walk, or a since-sync one) with nothing
+        // failed or skipped by an error. A cancelled run never gets here.
+        const previous = getSyncMark(serviceId, creatorId, options.includeKinds)
+        const next = nextSyncMark({
+          coveredFromMark: sinceSync || runPeriod === undefined,
+          incomplete: creatorIncomplete || this.progress.failed > failedBefore,
+          previous,
+          newestSeen
+        })
+        if (next) setSyncMark(serviceId, creatorId, next, options.includeKinds)
       }
     } finally {
       this.running = false

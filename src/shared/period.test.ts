@@ -3,10 +3,13 @@ import {
   DEFAULT_PERIOD_PREF,
   MAX_PERIOD_DAYS,
   isPeriodPrefIncomplete,
+  SYNC_OVERLAP_MS,
   maybeInPeriod,
+  nextSyncMark,
   periodPosition,
   periodRangeFromPref,
-  periodToMs
+  periodToMs,
+  syncPeriod
 } from './period'
 
 const now = new Date('2026-10-04T12:00:00Z')
@@ -95,5 +98,43 @@ describe('periodPosition', () => {
   it('treats no period as everything in range', () => {
     expect(maybeInPeriod('2000-01-01T00:00:00Z', undefined)).toBe(true)
     expect(periodToMs(undefined)).toBeUndefined()
+  })
+})
+
+describe('since-last-sync helpers', () => {
+  const mark = '2026-09-01T00:00:00.000Z'
+
+  it('leaves sinceSync to the engine (no run-wide range, never "incomplete")', () => {
+    const pref = { ...DEFAULT_PERIOD_PREF, mode: 'sinceSync' as const }
+    expect(periodRangeFromPref(pref, now)).toBeUndefined()
+    expect(isPeriodPrefIncomplete(pref)).toBe(false)
+  })
+
+  it("starts a creator's walk an overlap before its mark, or walks all without one", () => {
+    expect(syncPeriod(mark)).toEqual({ from: Date.parse(mark) - SYNC_OVERLAP_MS })
+    expect(syncPeriod(undefined)).toBeUndefined()
+    expect(syncPeriod('garbage')).toBeUndefined()
+  })
+
+  const clean = { coveredFromMark: true, incomplete: false, previous: mark }
+
+  it('advances to the newest post seen after a clean, covering walk', () => {
+    expect(nextSyncMark({ ...clean, newestSeen: '2026-09-10T00:00:00Z' })).toBe(
+      '2026-09-10T00:00:00.000Z'
+    )
+    expect(
+      nextSyncMark({ ...clean, previous: undefined, newestSeen: '2026-09-10T00:00:00Z' })
+    ).toBe('2026-09-10T00:00:00.000Z')
+  })
+
+  it('never advances over a gap: failed/skipped posts or a walk not reaching the mark', () => {
+    const newestSeen = '2026-09-10T00:00:00Z'
+    expect(nextSyncMark({ ...clean, incomplete: true, newestSeen })).toBeUndefined()
+    expect(nextSyncMark({ ...clean, coveredFromMark: false, newestSeen })).toBeUndefined()
+  })
+
+  it('keeps the mark when nothing newer was seen', () => {
+    expect(nextSyncMark({ ...clean, newestSeen: undefined })).toBeUndefined()
+    expect(nextSyncMark({ ...clean, newestSeen: '2026-08-01T00:00:00Z' })).toBeUndefined()
   })
 })

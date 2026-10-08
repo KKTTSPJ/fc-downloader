@@ -119,6 +119,7 @@ export const patreonService: Service = {
         doc = await ctx.fetchJson<JsonApiDoc<RawPatreonPost[]>>(nextUrl)
       } catch (err) {
         ctx.log('warn', `posts page failed for campaign ${creatorId}`, err)
+        ctx.markIncomplete?.()
         return
       }
       const mediaById: Map<string, RawPatreonMedia> = mediaMapFromIncluded(doc.included)

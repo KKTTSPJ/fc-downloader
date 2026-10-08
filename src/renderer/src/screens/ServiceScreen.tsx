@@ -551,7 +551,8 @@ function PeriodPicker({
   const modes: [PeriodPref['mode'], string][] = [
     ['all', L.periodAll],
     ['recent', L.periodRecent],
-    ['range', L.periodRange]
+    ['range', L.periodRange],
+    ['sinceSync', L.periodSinceSync]
   ]
   const field: React.CSSProperties = {
     fontFamily: 'var(--mono)',
@@ -630,6 +631,9 @@ function PeriodPicker({
               style={field}
             />
           </div>
+        )}
+        {value.mode === 'sinceSync' && (
+          <div style={{ fontSize: 11, color: 'var(--text-3)' }}>{L.periodSinceSyncHint}</div>
         )}
         {isPeriodPrefIncomplete(value) && (
           <div style={{ fontSize: 11, color: 'var(--warn)' }}>{L.periodRangeEmpty}</div>
@@ -796,7 +800,8 @@ function SettingsPanel({
       skipExisting: skipDup,
       concurrency: app.state.concurrency,
       includeKinds,
-      period: periodRangeFromPref(period, new Date())
+      period: periodRangeFromPref(period, new Date()),
+      sinceLastSync: period.mode === 'sinceSync'
     })
   }
 

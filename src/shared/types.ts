@@ -186,6 +186,9 @@ export interface DownloadOptions {
   /** Only posts published in this range (ISO; `from` inclusive, `to`
    *  exclusive, either end optional). Absent = all posts. */
   period?: PeriodRange
+  /** Per creator: only posts since its last cleanly completed run (the ledger's
+   *  sync mark); creators without one are walked in full. Overrides `period`. */
+  sinceLastSync?: boolean
 }
 
 /** Persisted application-wide settings. */

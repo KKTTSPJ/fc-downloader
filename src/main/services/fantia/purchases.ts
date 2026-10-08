@@ -155,6 +155,7 @@ export async function loadPurchasedProducts(ctx: ServiceContext): Promise<Purcha
       html = await ctx.fetchText(`${BASE}/mypage/users/purchases?page=${page}`)
     } catch (err) {
       ctx.log('warn', `purchases page ${page} failed`, err)
+      ctx.markIncomplete?.()
       break
     }
     const before = purchasedIds.size + orderIds.size
@@ -178,6 +179,7 @@ export async function loadPurchasedProducts(ctx: ServiceContext): Promise<Purcha
       }
     } catch (err) {
       ctx.log('warn', `purchase order ${orderId} failed`, err)
+      ctx.markIncomplete?.()
     }
   }
 
@@ -190,6 +192,7 @@ export async function loadPurchasedProducts(ctx: ServiceContext): Promise<Purcha
       item.imageUrl = parseProductImageUrl(html)
     } catch (err) {
       ctx.log('warn', `product ${item.productId} page failed`, err)
+      ctx.markIncomplete?.()
     }
   }
 

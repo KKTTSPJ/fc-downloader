@@ -164,3 +164,46 @@ describe('fanboxService period filter', () => {
     expect(hits).not.toContain(PAGE2)
   })
 })
+
+describe('fanboxService incomplete reporting (guards the sync mark)', () => {
+  it('reports a skipped post.info failure', async () => {
+    const { ctx } = fakeCtx()
+    let incomplete = 0
+    ctx.markIncomplete = () => {
+      incomplete++
+    }
+    const fetchJson = ctx.fetchJson.bind(ctx)
+    ctx.fetchJson = async <T>(url: string): Promise<T> => {
+      if (url.endsWith('postId=103')) throw new Error('HTTP 500')
+      return fetchJson<T>(url)
+    }
+    const posts = await collect(fanboxService.listPosts(ctx, 'c1'))
+    expect(posts.map((p) => p.postId)).toEqual(['101'])
+    expect(incomplete).toBe(1)
+  })
+
+  it('reports a skipped listing page failure', async () => {
+    const { ctx } = fakeCtx()
+    let incomplete = 0
+    ctx.markIncomplete = () => {
+      incomplete++
+    }
+    const fetchJson = ctx.fetchJson.bind(ctx)
+    ctx.fetchJson = async <T>(url: string): Promise<T> => {
+      if (url === PAGE2) throw new Error('HTTP 429')
+      return fetchJson<T>(url)
+    }
+    await collect(fanboxService.listPosts(ctx, 'c1'))
+    expect(incomplete).toBe(1)
+  })
+
+  it('reports nothing on a clean walk', async () => {
+    const { ctx } = fakeCtx()
+    let incomplete = 0
+    ctx.markIncomplete = () => {
+      incomplete++
+    }
+    await collect(fanboxService.listPosts(ctx, 'c1'))
+    expect(incomplete).toBe(0)
+  })
+})

@@ -49,6 +49,13 @@ export interface ServiceContext {
    * use it to skip detail fetches and stop paging early. Absent = all posts.
    */
   period?: PeriodMs
+  /**
+   * Report that this creator's walk is incomplete: a listing page or post
+   * detail fetch failed and was skipped. Adapters call it wherever they log and
+   * carry on past such an error, so the engine doesn't advance the creator's
+   * sync mark over a gap. Absent on non-download contexts.
+   */
+  markIncomplete?(): void
 }
 
 export interface Service {
