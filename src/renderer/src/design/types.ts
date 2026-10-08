@@ -1,6 +1,7 @@
 /* fc-downloader — renderer design-layer types (ported from the design handoff) */
 import type { Creator, DownloadOptions, DownloadProgress } from '@shared/types'
 import type { ViewPost } from './library'
+import type { PeriodPref } from '@shared/period'
 
 export type ServiceId = 'fantia' | 'fanbox' | 'patreon' | 'cien'
 
@@ -88,6 +89,8 @@ export interface DownloadPrefs {
   file: boolean
   /** Skip posts already fully downloaded (dedup). */
   skipDup: boolean
+  /** Publish-date period (absent in prefs saved before it existed = all). */
+  period?: PeriodPref
 }
 
 /** A live download run, driven by real main-process events. */

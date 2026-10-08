@@ -34,6 +34,7 @@ import { LibraryScreen } from './screens/LibraryScreen'
 import { FavoritesScreen } from './screens/FavoritesScreen'
 import { PostDetail } from './screens/PostDetail'
 import { SettingsScreen } from './screens/SettingsScreen'
+import { isPeriodPrefIncomplete, periodRangeFromPref } from '@shared/period'
 
 const PREFS_KEY = 'fc_prefs'
 const FAVS_KEY = 'fc_favs'
@@ -503,8 +504,8 @@ export function App() {
   }
 
   // Build download options for a service from its saved settings. Returns null
-  // when nothing would download (no file kinds, or an explicitly empty creator
-  // selection). An absent creator selection means "all" (creatorIds: []).
+  // when nothing would download (no file kinds, an explicitly empty creator
+  // selection, or a date range with neither date set). An absent creator selection means "all" (creatorIds: []).
   const buildDownloadOptions = (svcId: ServiceId): DownloadOptions | null => {
     const includeKinds: PostFileKind[] = []
     if (downloadPrefs.image) includeKinds.push('image')
@@ -513,7 +514,15 @@ export function App() {
     if (includeKinds.length === 0) return null
     const saved = creatorSel[svcId]
     if (saved && saved.length === 0) return null
-    return { creatorIds: saved ?? [], skipExisting: downloadPrefs.skipDup, concurrency, includeKinds }
+    // A date range with no dates would silently mean "all posts": skip instead.
+    if (isPeriodPrefIncomplete(downloadPrefs.period)) return null
+    return {
+      creatorIds: saved ?? [],
+      skipExisting: downloadPrefs.skipDup,
+      concurrency,
+      includeKinds,
+      period: periodRangeFromPref(downloadPrefs.period, new Date())
+    }
   }
 
   // Enqueue a single service's run (main-process queue serializes services).

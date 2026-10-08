@@ -3,6 +3,7 @@
  * Keep this file free of any Node/Electron/DOM-specific imports so it can be
  * consumed from either side.
  */
+import type { PeriodRange } from './period'
 
 /** Stable identifier for a supported support-site service. */
 export type ServiceId = 'fantia' | 'fanbox' | 'patreon' | 'cien'
@@ -182,6 +183,9 @@ export interface DownloadOptions {
   concurrency: number
   /** Which file kinds to include. */
   includeKinds: PostFileKind[]
+  /** Only posts published in this range (ISO; `from` inclusive, `to`
+   *  exclusive, either end optional). Absent = all posts. */
+  period?: PeriodRange
 }
 
 /** Persisted application-wide settings. */

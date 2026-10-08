@@ -100,10 +100,12 @@ export function extractPageItems(body: unknown): FanboxListingItem[] {
  * VERIFY: subset of a paginate-page post summary. `isRestricted` is true when
  * the viewer's plan doesn't cover the post — its `post.info` body is then null
  * (normalizePost returns null), so the detail fetch can be skipped entirely.
+ * `publishedDatetime` (ISO) lets a dated run filter/stop without post.info.
  */
 export interface FanboxListingItem {
   id: string
   isRestricted?: boolean
+  publishedDatetime?: string
 }
 
 /** VERIFY: subset of the api.fanbox.cc `post.info` response body. */
