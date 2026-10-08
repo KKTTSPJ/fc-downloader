@@ -79,6 +79,9 @@ export const LANG: Record<Lang, Dict> = {
     periodRange: '期間指定',
     periodDaysSuffix: '日以内',
     periodRangeEmpty: '開始日か終了日を入力してください',
+    periodSinceSync: '前回以降',
+    periodSinceSyncHint:
+      'クリエイターごとに、前回正常に完了した取得以降の投稿が対象（失敗・中断した回の分は次回に確認し直します）。初回はすべての投稿が対象',
     loginRequired: 'ログインが必要です',
     noActiveDownload: '進行中のダウンロードはありません',
     downloading: 'ダウンロード中',
@@ -266,6 +269,9 @@ export const LANG: Record<Lang, Dict> = {
     periodRange: 'Range',
     periodDaysSuffix: 'days',
     periodRangeEmpty: 'Enter a start or end date',
+    periodSinceSync: 'Since last',
+    periodSinceSyncHint:
+      'Per creator: posts since its last fully completed run (a failed or interrupted run is re-checked next time). The first run covers all posts',
     loginRequired: 'Login required',
     noActiveDownload: 'No active download',
     downloading: 'Downloading',

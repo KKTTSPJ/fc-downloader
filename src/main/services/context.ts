@@ -17,6 +17,8 @@ export interface ServiceContextOpts {
   onProgress?: (done: number, total: number) => void
   /** The run's publish-date period (wired to `ctx.period`). */
   period?: PeriodMs
+  /** Sink for `ctx.markIncomplete` (a listing/detail fetch was skipped). */
+  onIncomplete?: () => void
 }
 
 export function createServiceContext(
@@ -31,7 +33,7 @@ export function createServiceContext(
     else console.log(line, meta ?? '')
   }
 
-  const { includeKinds, onRetry, onProgress, period } = opts
+  const { includeKinds, onRetry, onProgress, period, onIncomplete } = opts
   // ci-en serves its rate-limit/bot-block as HTTP 403 (normally a permanent
   // error). For ci-en only, treat 403 as transient so it backs off and retries
   // like a 429 instead of silently dropping the request.
@@ -41,6 +43,7 @@ export function createServiceContext(
     log,
     ...(onProgress ? { progress: onProgress } : {}),
     ...(period ? { period } : {}),
+    ...(onIncomplete ? { markIncomplete: onIncomplete } : {}),
     async fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
       const res = await requestForWithRetry(serviceId, url, { ...init, signal, onRetry, retriableStatuses })
       if (res.status >= 400) throw new Error(`HTTP ${res.status} for ${url}`)

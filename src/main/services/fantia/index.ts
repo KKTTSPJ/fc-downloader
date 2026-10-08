@@ -109,6 +109,7 @@ export const fantiaService: Service = {
     // detail fetch, so a product sitting in one would otherwise never be seen.
     const products = await loadPurchasedProducts(ctx).catch((err) => {
       ctx.log('warn', 'purchased product list unavailable', err)
+      ctx.markIncomplete?.()
       return []
     })
     for (const p of products) {
@@ -128,6 +129,7 @@ export const fantiaService: Service = {
         html = await ctx.fetchText(`${BASE}/fanclubs/${encodeURIComponent(creatorId)}/posts?page=${page}`)
       } catch (err) {
         ctx.log('error', `fanclub posts page ${page} failed for ${creatorId}`, err)
+        ctx.markIncomplete?.()
         return
       }
       if (!csrf) csrf = extractCsrf(html)
@@ -189,6 +191,7 @@ async function fetchPostDetail(
     return normalizePost(creatorId, res)
   } catch (err) {
     ctx.log('warn', `post ${postId} detail failed`, err)
+    ctx.markIncomplete?.()
     return null
   }
 }

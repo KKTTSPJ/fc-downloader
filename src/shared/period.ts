@@ -6,7 +6,9 @@
 
 /** The period form's persisted state (renderer download prefs). */
 export interface PeriodPref {
-  mode: 'all' | 'recent' | 'range'
+  /** `sinceSync`: posts since this creator's last cleanly completed run (see
+   *  `syncPeriod`); a creator never completed cleanly is walked in full. */
+  mode: 'all' | 'recent' | 'range' | 'sinceSync'
   /** `recent`: how many days back from now. */
   days: number
   /** `range`: local calendar dates "YYYY-MM-DD"; empty = open-ended. */
@@ -50,7 +52,8 @@ export function periodRangeFromPref(
   pref: PeriodPref | undefined,
   now: Date
 ): PeriodRange | undefined {
-  if (!pref || pref.mode === 'all') return undefined
+  // `sinceSync` is per creator, resolved by the engine from the ledger.
+  if (!pref || pref.mode === 'all' || pref.mode === 'sinceSync') return undefined
   if (pref.mode === 'recent') {
     if (!Number.isFinite(pref.days) || pref.days < 1) return undefined
     const days = Math.min(Math.floor(pref.days), MAX_PERIOD_DAYS)
@@ -71,6 +74,47 @@ export function periodRangeFromPref(
  */
 export function isPeriodPrefIncomplete(pref: PeriodPref | undefined): boolean {
   return pref?.mode === 'range' && !localMidnight(pref.from) && !localMidnight(pref.to)
+}
+
+/**
+ * How far before a creator's sync mark a `sinceSync` run starts. Posts are
+ * re-checked across this overlap (cheap with skip-existing) so a post dated
+ * just before the mark — clock/timezone slop, a late-appearing post — isn't
+ * missed.
+ */
+export const SYNC_OVERLAP_MS = DAY_MS
+
+/**
+ * The period for a `sinceSync` run of one creator, from its sync mark (the
+ * newest publish time confirmed by its last cleanly completed run). No mark
+ * (never completed cleanly) = no period: walk everything.
+ */
+export function syncPeriod(mark: string | undefined): PeriodMs | undefined {
+  const t = mark ? Date.parse(mark) : NaN
+  return Number.isFinite(t) ? { from: t - SYNC_OVERLAP_MS } : undefined
+}
+
+/**
+ * The creator's next sync mark after a run: the newer of the previous mark and
+ * the newest publish time seen, or undefined to leave the mark unchanged. Only
+ * a run that covered everything from the previous mark (or from the start)
+ * through the newest post, with nothing failed or skipped by an error, may
+ * advance it — otherwise a gap below the newest post would be skipped for good.
+ */
+export function nextSyncMark(run: {
+  /** The run's lower bound reached back to the previous mark (or none). */
+  coveredFromMark: boolean
+  /** Any file failed, or the adapter reported a listing/detail fetch error. */
+  incomplete: boolean
+  previous: string | undefined
+  newestSeen: string | undefined
+}): string | undefined {
+  if (!run.coveredFromMark || run.incomplete) return undefined
+  const prev = run.previous ? Date.parse(run.previous) : NaN
+  const seen = run.newestSeen ? Date.parse(run.newestSeen) : NaN
+  if (!Number.isFinite(seen)) return undefined
+  if (Number.isFinite(prev) && prev >= seen) return undefined
+  return new Date(seen).toISOString()
 }
 
 /** Parse a run's range into epoch ms (unparseable ends are dropped). */

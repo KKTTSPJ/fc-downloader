@@ -6,6 +6,7 @@ import type { Post } from '@shared/types'
 import {
   closeDb,
   completedPostStub,
+  getSyncMark,
   creatorsMissingIcon,
   initDb,
   isFileDownloaded,
@@ -15,6 +16,7 @@ import {
   reconcileWithDisk,
   refreshPostCompletion,
   setCreatorIcon,
+  setSyncMark,
   upsertPost
 } from './db'
 import { initSettings } from './settings'
@@ -375,5 +377,30 @@ describe('listPosts', () => {
     upsertPost(mk('1', '2024-01-01T00:00:00.000Z'), '/root/1')
     upsertPost(mk('2', '2026-01-01T00:00:00.000Z'), '/root/2')
     expect(listPosts().map((p) => p.postId)).toEqual(['2', '1'])
+  })
+})
+
+describe('sync marks (since-last-sync runs)', () => {
+  const at = '2026-09-10T00:00:00.000Z'
+
+  it('returns nothing until a mark is recorded', () => {
+    expect(getSyncMark('fanbox', 'c1', ['image'])).toBeUndefined()
+  })
+
+  it('applies a mark only to runs whose kinds it covers', () => {
+    setSyncMark('fanbox', 'c1', at, ['image', 'video'])
+    expect(getSyncMark('fanbox', 'c1', ['image'])).toBe(at)
+    expect(getSyncMark('fanbox', 'c1', ['image', 'video'])).toBe(at)
+    // A run that adds a kind must look at older posts again for it.
+    expect(getSyncMark('fanbox', 'c1', ['image', 'file'])).toBeUndefined()
+    // Marks are per creator.
+    expect(getSyncMark('fanbox', 'c2', ['image'])).toBeUndefined()
+  })
+
+  it('persists across a reload', () => {
+    setSyncMark('fanbox', 'c1', at, ['image'])
+    closeDb()
+    initDb(dir)
+    expect(getSyncMark('fanbox', 'c1', ['image'])).toBe(at)
   })
 })

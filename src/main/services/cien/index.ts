@@ -147,6 +147,7 @@ export const cienService: Service = {
         html = await ctx.fetchText(`${BASE}/creator/${creatorId}/article?page=${page}`)
       } catch (err) {
         ctx.log('warn', `article list page ${page} failed for ${creatorId}`, err)
+        ctx.markIncomplete?.()
         return
       }
       // New article ids on this page; once a page yields nothing new we're done
@@ -200,6 +201,7 @@ async function fetchArticle(
     html = await ctx.fetchText(`${BASE}/creator/${creatorId}/article/${articleId}`)
   } catch (err) {
     ctx.log('warn', `article ${articleId} failed`, err)
+    ctx.markIncomplete?.()
     return null
   }
   const files = parseAttachments(html)

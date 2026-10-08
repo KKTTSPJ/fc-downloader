@@ -521,7 +521,8 @@ export function App() {
       skipExisting: downloadPrefs.skipDup,
       concurrency,
       includeKinds,
-      period: periodRangeFromPref(downloadPrefs.period, new Date())
+      period: periodRangeFromPref(downloadPrefs.period, new Date()),
+      sinceLastSync: downloadPrefs.period?.mode === 'sinceSync'
     }
   }
 
