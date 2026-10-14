@@ -3,7 +3,7 @@
  * skips anything already on disk (dedup via the metadata DB), and downloads
  * remaining files with bounded concurrency, emitting progress events.
  */
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
   DownloadActivity,
@@ -310,9 +310,11 @@ export class DownloadEngine {
     // across two); a new one goes where the folder patterns put it. The folder
     // itself is only made when a file is actually saved — a post with nothing
     // to download leaves no empty folder behind.
+    // A recorded folder that is gone or emptied (the user deleted the files)
+    // holds nothing to keep together, so the post moves to the pattern's place.
     const recorded = recordedPostDir(serviceId, post.creatorId, post.postId)
     const dir =
-      recorded && isWithinRoot(root, recorded)
+      recorded && isWithinRoot(root, recorded) && (await hasEntries(recorded))
         ? recorded
         : patternPostDir(root, serviceId, this.patterns, folderCreator, post)
     upsertPost(post, dir, creatorName, creatorIconUrl)
@@ -438,6 +440,15 @@ export class DownloadEngine {
     }
   }
 
+}
+
+/** Whether a directory exists and holds anything. */
+async function hasEntries(dir: string): Promise<boolean> {
+  try {
+    return (await readdir(dir)).length > 0
+  } catch {
+    return false
+  }
 }
 
 function blankProgress(): DownloadProgress {
