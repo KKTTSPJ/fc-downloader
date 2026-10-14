@@ -1,5 +1,14 @@
 /* fc-downloader — settings: cookies/account, storage, general */
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  DEFAULT_CREATOR_FOLDER_PATTERN,
+  DEFAULT_POST_FOLDER_PATTERN,
+  creatorFolderName,
+  postFolderSegments,
+  validateCreatorFolderPattern,
+  validatePostFolderPattern,
+  type FolderPatternError
+} from '@shared/folderPattern'
 import { FC, fmtSize } from '../design/data'
 import { countsForService } from '../design/library'
 import { Icon } from '../design/icons'
@@ -122,6 +131,67 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   )
 }
 
+/**
+ * A folder-name pattern field that commits on blur / Enter. An invalid entry is
+ * kept for editing (with the reason shown) and not saved; committing the
+ * default clears the setting.
+ */
+function PatternInput({
+  value,
+  defaultPattern,
+  validate,
+  errorText,
+  onCommit
+}: {
+  value: string | undefined
+  defaultPattern: string
+  validate: (pattern: string) => FolderPatternError | null
+  errorText: (err: FolderPatternError) => string
+  onCommit: (pattern: string | undefined) => void
+}) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft ?? value ?? defaultPattern
+  const error = validate(shown)
+  const commit = (): void => {
+    if (draft === null || error) return
+    setDraft(null)
+    const p = draft.trim()
+    onCommit(p === defaultPattern ? undefined : p)
+  }
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 260 }}>
+      <input
+        type="text"
+        spellCheck={false}
+        value={shown}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur()
+        }}
+        style={{
+          fontFamily: 'var(--mono)',
+          fontSize: 12.5,
+          padding: '6px 10px',
+          borderRadius: 8,
+          border: '1px solid ' + (error ? 'var(--warn)' : 'var(--border)'),
+          background: 'var(--surface-2)',
+          color: 'var(--text)'
+        }}
+      />
+      {error && <span style={{ fontSize: 11, color: 'var(--warn)' }}>{errorText(error)}</span>}
+    </div>
+  )
+}
+
+/** Sample values for the folder-name preview. */
+const PREVIEW_CREATOR = { creatorId: '12345', creatorName: 'Creator' }
+const PREVIEW_POST = {
+  postId: '67890',
+  title: 'Post title',
+  postedAt: new Date(2026, 0, 23, 12).toISOString()
+}
+
 export function SettingsScreen() {
   const app = useApp()
   const L = app.L
@@ -135,6 +205,35 @@ export function SettingsScreen() {
   const eligibleCount = FC.SERVICES.filter(
     (s) => state.enabledServices[s.id] !== false && state.logins[s.id]
   ).length
+
+  // Folder-name patterns (AppSettings.creatorFolderPattern / postFolderPattern).
+  const [patterns, setPatterns] = useState<{ creator?: string; post?: string }>({})
+  useEffect(() => {
+    void bridge
+      .getSettings()
+      .then((s) => s && setPatterns({ creator: s.creatorFolderPattern, post: s.postFolderPattern }))
+  }, [])
+  const setCreatorPattern = (p: string | undefined): void => {
+    setPatterns((cur) => ({ ...cur, creator: p }))
+    void bridge.updateSettings({ creatorFolderPattern: p })
+  }
+  const setPostPattern = (p: string | undefined): void => {
+    setPatterns((cur) => ({ ...cur, post: p }))
+    void bridge.updateSettings({ postFolderPattern: p })
+  }
+  const patternError = (err: FolderPatternError): string =>
+    err === 'empty'
+      ? L.folderErrEmpty
+      : err === 'missingPostId'
+        ? L.folderErrMissingPostId
+        : L.folderErrUnknownToken
+  const folderPreview = [
+    creatorFolderName(patterns.creator, PREVIEW_CREATOR),
+    ...postFolderSegments(patterns.post, PREVIEW_POST)
+  ].join('/')
+  const creatorPatternLacksId = !(patterns.creator ?? DEFAULT_CREATOR_FOLDER_PATTERN).includes(
+    '{creatorId}'
+  )
 
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<string | null>(null)
@@ -382,6 +481,36 @@ export function SettingsScreen() {
             >
               {verifying ? L.verifying : L.verifyRun}
             </Btn>
+          </div>
+        </SettingsCard>
+
+        <SettingsCard title={L.folderNames} desc={L.folderNamesDesc}>
+          <Setting label={L.creatorFolder} hint={L.creatorFolderHint}>
+            <PatternInput
+              value={patterns.creator}
+              defaultPattern={DEFAULT_CREATOR_FOLDER_PATTERN}
+              validate={validateCreatorFolderPattern}
+              errorText={patternError}
+              onCommit={setCreatorPattern}
+            />
+          </Setting>
+          <Setting label={L.postFolder} hint={L.postFolderHint}>
+            <PatternInput
+              value={patterns.post}
+              defaultPattern={DEFAULT_POST_FOLDER_PATTERN}
+              validate={validatePostFolderPattern}
+              errorText={patternError}
+              onCommit={setPostPattern}
+            />
+          </Setting>
+          <div style={{ paddingTop: 13, fontSize: 11.5, color: 'var(--text-3)' }}>
+            {L.folderPreview}:{' '}
+            <span style={{ fontFamily: 'var(--mono)', color: 'var(--text)' }}>
+              …/fanbox/{folderPreview}/
+            </span>
+            {creatorPatternLacksId && (
+              <div style={{ marginTop: 6, color: 'var(--warn)' }}>{L.creatorFolderNoIdWarn}</div>
+            )}
           </div>
         </SettingsCard>
 

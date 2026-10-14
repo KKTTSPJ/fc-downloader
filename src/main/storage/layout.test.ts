@@ -1,5 +1,14 @@
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { dedupeFileNames, pad2, postDir, sanitizeFileName, toLocationParts } from './layout'
+import {
+  creatorDir,
+  dedupeFileNames,
+  pad2,
+  patternPostDir,
+  postDir,
+  sanitizeFileName,
+  toLocationParts
+} from './layout'
 
 describe('toLocationParts', () => {
   it('derives year/month from an ISO timestamp', () => {
@@ -67,5 +76,27 @@ describe('postDir', () => {
     })
     // Normalize separators for cross-platform assertion.
     expect(dir.replace(/\\/g, '/')).toBe('/root/fantia/123/2026/06/999')
+  })
+})
+
+describe('patternPostDir / creatorDir', () => {
+  const creator = { creatorId: 'c1', creatorName: 'Name' }
+  const post = { postId: 'p1', title: 't', postedAt: new Date(2026, 4, 9, 12).toISOString() }
+
+  it('defaults to <service>/<creatorId>/<year>/<month>/<postId>', () => {
+    expect(patternPostDir('/root', 'fanbox', {}, creator, post)).toBe(
+      join('/root', 'fanbox', 'c1', '2026', '05', 'p1')
+    )
+    expect(creatorDir('/root', 'fanbox', {}, creator)).toBe(join('/root', 'fanbox', 'c1'))
+  })
+
+  it('applies the user patterns', () => {
+    const patterns = {
+      creatorFolderPattern: '{creatorName}({creatorId})',
+      postFolderPattern: '[{year}{month}{day}]{postId}'
+    }
+    expect(patternPostDir('/root', 'fanbox', patterns, creator, post)).toBe(
+      join('/root', 'fanbox', 'Name(c1)', '[20260509]p1')
+    )
   })
 })
