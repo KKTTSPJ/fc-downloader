@@ -13,10 +13,12 @@ import {
   periodRangeFromPref,
   type PeriodPref
 } from '@shared/period'
+import { CREATOR_ADD_SERVICES } from '@shared/constants'
 
 /** Public web page for a creator, for jumping the embedded browser to it.
- *  Patreon's creatorId is a campaign id with no clean public URL → not linkable. */
-function creatorPageUrl(serviceId: ServiceId, creatorId: string): string | null {
+ *  Patreon's creatorId is a campaign id with no clean public URL, so it uses
+ *  the page URL the listing reported (if any). */
+function creatorPageUrl(serviceId: ServiceId, creatorId: string, pageUrl?: string): string | null {
   const id = encodeURIComponent(creatorId)
   switch (serviceId) {
     case 'fanbox':
@@ -26,12 +28,15 @@ function creatorPageUrl(serviceId: ServiceId, creatorId: string): string | null 
     case 'cien':
       return `https://ci-en.dlsite.com/creator/${id}`
     default:
-      return null
+      return pageUrl ?? null
   }
 }
 
 /** Imperative handle the creator list uses to drive the embedded browser. */
 type WebviewNavRef = React.MutableRefObject<((url: string) => void) | null>
+
+/** Reads the embedded browser's current page URL (null before it's ready). */
+type WebviewUrlRef = React.MutableRefObject<(() => string | null) | null>
 
 /** The subset of Electron's <webview> element API the toolbar drives. */
 interface WebviewEl extends HTMLElement {
@@ -90,12 +95,14 @@ function BrowserPane({
   loggedIn,
   onRecheck,
   navRef,
+  urlRef,
   L
 }: {
   svc: DesignService
   loggedIn: boolean
   onRecheck: () => void
   navRef: WebviewNavRef
+  urlRef: WebviewUrlRef
   L: Dict
 }) {
   const ref = useRef<WebviewEl | null>(null)
@@ -163,6 +170,14 @@ function BrowserPane({
   navRef.current = (url: string): void => {
     setUrl(url)
     drive((el) => void el.loadURL(url))
+  }
+  // Let the creator list read the page the user is on ("add this creator").
+  urlRef.current = (): string | null => {
+    try {
+      return ref.current?.getURL() || null
+    } catch {
+      return null // webview not ready
+    }
   }
 
   return (
@@ -323,7 +338,9 @@ function Check({
   sub,
   mark,
   badge,
-  count
+  count,
+  onRemove,
+  removeTitle
 }: {
   on: boolean
   /** Toggle DL selection (the checkbox only). */
@@ -337,6 +354,9 @@ function Check({
   mark?: React.ReactNode
   badge?: React.ReactNode
   count?: number
+  /** Remove this entry from the list (creators the user added). */
+  onRemove?: () => void
+  removeTitle?: string
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 4px' }}>
@@ -393,6 +413,16 @@ function Check({
       {count != null && (
         <span style={{ fontSize: 11.5, color: 'var(--text-3)', fontFamily: 'var(--mono)' }}>
           {count}
+        </span>
+      )}
+      {onRemove && (
+        <span
+          onClick={onRemove}
+          title={removeTitle}
+          role="button"
+          style={{ display: 'flex', color: 'var(--text-3)', cursor: 'pointer', padding: 2 }}
+        >
+          <Icon name="x" size={12} />
         </span>
       )}
     </div>
@@ -698,11 +728,13 @@ function OptToggle({
 function SettingsPanel({
   svc,
   loggedIn,
-  navRef
+  navRef,
+  urlRef
 }: {
   svc: DesignService
   loggedIn: boolean
   navRef: WebviewNavRef
+  urlRef: WebviewUrlRef
 }) {
   const app = useApp()
   const L = app.L
@@ -756,9 +788,33 @@ function SettingsPanel({
     persistSel(n)
   }
 
+  // "Add the creator shown in the browser", for services whose listing misses
+  // creators (Patreon free memberships). The note reports the last outcome.
+  const canAdd = loggedIn && CREATOR_ADD_SERVICES.includes(svc.id)
+  const [adding, setAdding] = useState(false)
+  const [addNote, setAddNote] = useState<{ text: string; ok: boolean } | null>(null)
+  useEffect(() => setAddNote(null), [svc.id])
+  const addFromBrowser = (): void => {
+    const pageUrl = urlRef.current?.()
+    if (adding || !pageUrl) return
+    const known = new Set(creators.map((c) => c.creatorId))
+    setAdding(true)
+    setAddNote(null)
+    void app.actions
+      .addCreator(svc.id, pageUrl)
+      .then((res) => {
+        if (res.ok) {
+          const tpl = known.has(res.creator.creatorId) ? L.addCreatorExists : L.addCreatorDone
+          setAddNote({ text: tpl.replace('{name}', res.creator.name), ok: true })
+        } else setAddNote({ text: L.addCreatorNotFound, ok: false })
+      })
+      .catch(() => setAddNote({ text: L.addCreatorFailed, ok: false }))
+      .finally(() => setAdding(false))
+  }
+
   // Paid(支援中) vs free(フォロー中) filter. Tabs only appear when the service
   // reports both kinds; otherwise the flat list (matching services that can't
-  // tell tiers apart, e.g. ci-en/Patreon) is shown as before.
+  // tell tiers apart, e.g. ci-en) is shown as before.
   const [tier, setTier] = useState<TierFilter>('all')
   const tierCounts: Record<TierFilter, number> = {
     all: creators.length,
@@ -949,7 +1005,7 @@ function SettingsPanel({
               <div style={{ padding: '10px 0', fontSize: 12, color: 'var(--text-3)' }}>{L.noCreators}</div>
             ) : (
               visible.map((c) => {
-                const url = creatorPageUrl(c.serviceId, c.creatorId)
+                const url = creatorPageUrl(c.serviceId, c.creatorId, c.pageUrl)
                 return (
                   <Check
                     key={c.creatorId}
@@ -968,11 +1024,48 @@ function SettingsPanel({
                         </>
                       ) : undefined
                     }
+                    onRemove={
+                      c.added ? () => app.actions.removeCreator(svc.id, c.creatorId) : undefined
+                    }
+                    removeTitle={L.removeAddedCreator}
                   />
                 )
               })
             )}
           </div>
+          {canAdd && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span
+                  onClick={addFromBrowser}
+                  role="button"
+                  title={L.addCreatorHint}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    color: adding ? 'var(--text-3)' : 'var(--accent)',
+                    cursor: adding ? 'default' : 'pointer'
+                  }}
+                >
+                  <Icon name="plus" size={12} />
+                  {L.addCreatorFromPage}
+                </span>
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 11,
+                  lineHeight: 1.5,
+                  color: addNote ? (addNote.ok ? 'var(--ok)' : 'var(--warn)') : 'var(--text-3)'
+                }}
+              >
+                {addNote ? addNote.text : L.addCreatorHint}
+              </div>
+            </div>
+          )}
         </div>
 
         <div>
@@ -1059,6 +1152,7 @@ export function ServiceScreen({ serviceId }: { serviceId: DesignService['id'] })
   const loggedIn = !!app.state.logins[serviceId]
   // Bridge: SettingsPanel's creator names drive BrowserPane's <webview>.
   const navRef = useRef<((url: string) => void) | null>(null)
+  const urlRef = useRef<(() => string | null) | null>(null)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
@@ -1068,6 +1162,7 @@ export function ServiceScreen({ serviceId }: { serviceId: DesignService['id'] })
           loggedIn={loggedIn}
           L={L}
           navRef={navRef}
+          urlRef={urlRef}
           onRecheck={() => app.actions.recheckAuth(serviceId)}
         />
         <div
@@ -1081,7 +1176,7 @@ export function ServiceScreen({ serviceId }: { serviceId: DesignService['id'] })
             boxShadow: 'var(--shadow-sm)'
           }}
         >
-          <SettingsPanel svc={svc} loggedIn={loggedIn} navRef={navRef} />
+          <SettingsPanel svc={svc} loggedIn={loggedIn} navRef={navRef} urlRef={urlRef} />
         </div>
       </div>
     </div>

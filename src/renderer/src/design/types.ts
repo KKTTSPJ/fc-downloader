@@ -2,6 +2,7 @@
 import type { Creator, DownloadOptions, DownloadProgress } from '@shared/types'
 import type { ViewPost } from './library'
 import type { PeriodPref } from '@shared/period'
+import type { AddCreatorResult } from '@shared/ipc'
 
 export type ServiceId = 'fantia' | 'fanbox' | 'patreon' | 'cien'
 
@@ -157,6 +158,11 @@ export interface AppActions {
   clearSession: (id: ServiceId) => void
   /** Load (or, with force, refresh) a service's supported creators into cache. */
   loadCreators: (id: ServiceId, force?: boolean) => void
+  /** Add the creator behind a page of the service (creators:add) to its list
+   *  and selection. Resolves with the outcome for the UI to report. */
+  addCreator: (id: ServiceId, pageUrl: string) => Promise<AddCreatorResult>
+  /** Remove a creator added with addCreator (creators:remove). */
+  removeCreator: (id: ServiceId, creatorId: string) => void
   /** Load (or, with force, refresh) the service's "has new posts" creator set. */
   loadNew: (id: ServiceId, force?: boolean) => void
   /** Kick off a real download run for a service with the given options. */

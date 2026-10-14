@@ -598,6 +598,54 @@ export function App() {
           setCreatorsProgress((s) => ({ ...s, [id]: undefined }))
         })
     },
+    addCreator: async (id, pageUrl) => {
+      const res = await bridge.addCreator(id, pageUrl)
+      if (!res.ok) return res
+      const added = res.creator
+      const patch = (list: Creator[] | undefined): Creator[] => {
+        const cur = list ?? []
+        // Already listed (e.g. a paid membership): keep the listing's entry.
+        return cur.some((c) => c.creatorId === added.creatorId) ? cur : [...cur, added]
+      }
+      setCreators((s) => ({ ...s, [id]: patch(s[id]) }))
+      try {
+        const cache = loadJson<CreatorsCache>(CREATORS_CACHE_KEY, {})
+        if (cache[id]) {
+          cache[id] = { ...cache[id], list: patch(cache[id].list) }
+          localStorage.setItem(CREATORS_CACHE_KEY, JSON.stringify(cache))
+        }
+      } catch {
+        /* best-effort cache */
+      }
+      // Select it: an explicit selection doesn't include new ids on its own.
+      setCreatorSelState((s) => {
+        const cur = s[id]
+        if (!cur || cur.includes(added.creatorId)) return s
+        const next = { ...s, [id]: [...cur, added.creatorId] }
+        try {
+          localStorage.setItem(CREATOR_SEL_KEY, JSON.stringify(next))
+        } catch {
+          /* ignore */
+        }
+        return next
+      })
+      return res
+    },
+    removeCreator: (id, creatorId) => {
+      void bridge.removeCreator(id, creatorId)
+      const drop = (list: Creator[] | undefined): Creator[] =>
+        (list ?? []).filter((c) => !(c.added && c.creatorId === creatorId))
+      setCreators((s) => ({ ...s, [id]: drop(s[id]) }))
+      try {
+        const cache = loadJson<CreatorsCache>(CREATORS_CACHE_KEY, {})
+        if (cache[id]) {
+          cache[id] = { ...cache[id], list: drop(cache[id].list) }
+          localStorage.setItem(CREATORS_CACHE_KEY, JSON.stringify(cache))
+        }
+      } catch {
+        /* best-effort cache */
+      }
+    },
     loadNew: (id, force) => {
       if (newLoadingRef.current[id]) return
       const fresh = (newFetchedAt.current[id] ?? 0) > Date.now() - CREATORS_TTL_MS

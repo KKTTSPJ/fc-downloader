@@ -81,6 +81,14 @@ export interface Service {
   listCreators(ctx: ServiceContext): Promise<Creator[]>
 
   /**
+   * Identify the creator behind a web page of this service (a creator page or
+   * one of their posts), so the user can add a creator the listing can't find.
+   * Null when the page doesn't belong to a creator. Optional: services whose
+   * listCreators is complete omit it (the UI then offers no "add" action).
+   */
+  resolveCreator?(ctx: ServiceContext, pageUrl: string): Promise<Creator | null>
+
+  /**
    * Recent posts across the user's subscriptions, newest-first, by walking the
    * service's home/recent feed (cheap — NOT one request per creator). Used by
    * the "new posts" indicator to find creators whose newest downloadable post

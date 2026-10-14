@@ -21,6 +21,12 @@ import type {
   ViewerNode
 } from './types'
 
+/** Outcome of `creators:add`. `unsupported`: the service can't add creators;
+ *  `notFound`: the page isn't a creator's (or the creator couldn't be read). */
+export type AddCreatorResult =
+  | { ok: true; creator: Creator }
+  | { ok: false; reason: 'unsupported' | 'notFound' }
+
 /** Channel name -> { args; result } for invoke/handle calls. */
 export interface IpcApi {
   'services:list': { args: []; result: ServiceDescriptor[] }
@@ -33,6 +39,11 @@ export interface IpcApi {
    * "new posts" indicator). Walks the service's recent feed; [] when the
    * service has no feed or nothing is new. */
   'creators:checkNew': { args: [serviceId: ServiceId]; result: string[] }
+  /** Add the creator behind a web page of the service (a creator page or one of
+   *  their posts) to its creator list, for creators the listing can't find. */
+  'creators:add': { args: [serviceId: ServiceId, pageUrl: string]; result: AddCreatorResult }
+  /** Remove a creator added with `creators:add`. */
+  'creators:remove': { args: [serviceId: ServiceId, creatorId: string]; result: void }
 
   'download:start': { args: [serviceId: ServiceId, options: DownloadOptions]; result: void }
   'download:cancel': { args: []; result: void }
