@@ -183,7 +183,7 @@ export const LANG: Record<Lang, Dict> = {
     creatorFolderHint: '使える変数: {creatorId} {creatorName}',
     postFolder: '投稿フォルダ',
     postFolderHint:
-      '使える変数: {year} {month} {day} {postId} {title}（/ で階層を作成、日付はこの PC の時刻）',
+      '使える変数: {year} {month} {day} {postId} {title}（/ で階層を作成、日付は UTC）',
     folderPreview: '例',
     folderErrEmpty: '空にはできません',
     folderErrUnknownToken: '使えない変数が含まれています',
@@ -395,7 +395,7 @@ export const LANG: Record<Lang, Dict> = {
     creatorFolderHint: 'Variables: {creatorId} {creatorName}',
     postFolder: 'Post folder',
     postFolderHint:
-      "Variables: {year} {month} {day} {postId} {title} (/ makes subfolders; dates use this PC's time zone)",
+      "Variables: {year} {month} {day} {postId} {title} (/ makes subfolders; dates are UTC)",
     folderPreview: 'Example',
     folderErrEmpty: "Can't be empty",
     folderErrUnknownToken: 'Contains an unknown variable',

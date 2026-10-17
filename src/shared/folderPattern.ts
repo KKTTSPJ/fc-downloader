@@ -92,9 +92,10 @@ export function creatorFolderName(
 const pad2 = (n: number): string => String(n).padStart(2, '0')
 
 /**
- * The post folder as path segments. Date tokens use the PC's local time (so a
- * Japanese user's `{day}` matches the date the site shows). Empty segments are
- * dropped; if nothing is left, the post id alone is used.
+ * The post folder as path segments. Date tokens are the publish time's UTC
+ * parts, like the year/month folders always were (layout.toLocationParts), so
+ * the default pattern keeps saving to exactly the same folders. Empty segments
+ * are dropped; if nothing is left, the post id alone is used.
  */
 export function postFolderSegments(
   pattern: string | undefined,
@@ -103,9 +104,9 @@ export function postFolderSegments(
   const d = new Date(post.postedAt)
   const valid = !Number.isNaN(d.getTime())
   const values: Record<string, string> = {
-    year: valid ? String(d.getFullYear()) : '0000',
-    month: valid ? pad2(d.getMonth() + 1) : '00',
-    day: valid ? pad2(d.getDate()) : '00',
+    year: valid ? String(d.getUTCFullYear()) : '0000',
+    month: valid ? pad2(d.getUTCMonth() + 1) : '00',
+    day: valid ? pad2(d.getUTCDate()) : '00',
     postId: post.postId,
     title: (post.title ?? '').trim().slice(0, MAX_TITLE_LENGTH)
   }

@@ -8,10 +8,7 @@ import {
   validatePostFolderPattern
 } from './folderPattern'
 
-// Local-time timestamp, so date tokens don't depend on the test machine's zone.
-const local = (y: number, m: number, d: number, h = 12): string =>
-  new Date(y, m - 1, d, h).toISOString()
-const post = { postId: '67890', title: 'A title', postedAt: local(2026, 1, 23) }
+const post = { postId: '67890', title: 'A title', postedAt: '2026-01-23T12:00:00.000Z' }
 
 describe('creatorFolderName', () => {
   it('defaults to the creator id', () => {
@@ -46,12 +43,18 @@ describe('postFolderSegments', () => {
     expect(postFolderSegments(DEFAULT_POST_FOLDER_PATTERN, post)).toEqual(['2026', '01', '67890'])
   })
 
-  it('renders a single dated folder in local time', () => {
+  it('renders a single dated folder from the UTC date', () => {
     expect(postFolderSegments('[{year}{month}{day}]{postId}', post)).toEqual(['[20260123]67890'])
-    // 00:30 local on the 1st stays the 1st (UTC would make it the previous day
-    // for zones ahead of UTC).
-    const early = { ...post, postedAt: local(2026, 3, 1, 0) }
-    expect(postFolderSegments('{year}{month}{day}{postId}', early)).toEqual(['2026030167890'])
+    // 2026-03-01 00:30 in UTC+9 is still Feb 28 in UTC: UTC wins, as for the
+    // year/month folders.
+    const early = { ...post, postedAt: '2026-03-01T00:30:00+09:00' }
+    expect(postFolderSegments('{year}{month}{day}{postId}', early)).toEqual(['2026022867890'])
+  })
+
+  it('keeps the default pattern on the original folders at a month boundary', () => {
+    // 2026-07-01 08:00 in UTC+9 = 2026-06-30 23:00 UTC -> the 06 folder, as before.
+    const edge = { ...post, postedAt: '2026-07-01T08:00:00+09:00' }
+    expect(postFolderSegments(undefined, edge)).toEqual(['2026', '06', '67890'])
   })
 
   it('sanitizes and caps the title, never nesting through it', () => {

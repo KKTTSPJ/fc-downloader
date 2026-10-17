@@ -189,7 +189,7 @@ const PREVIEW_CREATOR = { creatorId: '12345', creatorName: 'Creator' }
 const PREVIEW_POST = {
   postId: '67890',
   title: 'Post title',
-  postedAt: new Date(2026, 0, 23, 12).toISOString()
+  postedAt: '2026-01-23T12:00:00.000Z'
 }
 
 export function SettingsScreen() {
