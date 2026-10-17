@@ -6,7 +6,19 @@
  */
 import type { Creator, ServiceId } from '@shared/types'
 import { getSettings, updateSettings } from '@main/storage/settings'
+import { isSafeCreatorId, safeCreatorPageUrl } from '@shared/creatorUrl'
 import type { Service, ServiceContext } from './types'
+
+/**
+ * An added creator as it may be used: the id becomes a folder name and the page
+ * URL is opened in the embedded browser, and both may come from a hand-edited
+ * settings file — so an unsafe id drops the creator and a page URL off the
+ * service's own https site is dropped.
+ */
+function sanitizeAdded(c: Creator): Creator | null {
+  if (!isSafeCreatorId(c?.creatorId)) return null
+  return { ...c, pageUrl: safeCreatorPageUrl(c.serviceId, c.pageUrl) }
+}
 
 /**
  * Append the added creators the listing didn't return. A creator the listing
@@ -15,8 +27,9 @@ import type { Service, ServiceContext } from './types'
  */
 export function mergeAddedCreators(listed: Creator[], added: Creator[] | undefined): Creator[] {
   const seen = new Set(listed.map((c) => c.creatorId))
-  const extra = (added ?? [])
-    .filter((c) => !seen.has(c.creatorId))
+  const extra = (Array.isArray(added) ? added : [])
+    .map(sanitizeAdded)
+    .filter((c): c is Creator => c !== null && !seen.has(c.creatorId))
     .map((c) => ({ ...c, added: true }))
   return [...listed, ...extra]
 }
@@ -37,13 +50,14 @@ export async function listCreatorsWithAdded(
   return mergeAddedCreators(await service.listCreators(ctx), addedFor(service.id))
 }
 
-/** Store (or refresh) an added creator. */
+/** Store (or refresh) an added creator. An unsafe id is not stored. */
 export function saveAddedCreator(creator: Creator): void {
-  const all = getSettings().addedCreators ?? {}
-  const list = (all[creator.serviceId] ?? []).filter((c) => c.creatorId !== creator.creatorId)
-  const stored: Creator = { ...creator }
+  const stored = sanitizeAdded(creator)
+  if (!stored) return
   delete stored.added // derived on merge, not stored
-  updateSettings({ addedCreators: { ...all, [creator.serviceId]: [...list, stored] } })
+  const all = getSettings().addedCreators ?? {}
+  const list = (all[stored.serviceId] ?? []).filter((c) => c.creatorId !== stored.creatorId)
+  updateSettings({ addedCreators: { ...all, [stored.serviceId]: [...list, stored] } })
 }
 
 /** Forget an added creator (no-op for a creator the listing finds itself). */

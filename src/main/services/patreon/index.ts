@@ -19,10 +19,12 @@
 import type { Creator, Post } from '@shared/types'
 import type { Service, ServiceContext } from '../types'
 import {
+  campaignIdCandidates,
+  campaignMatchesRef,
   campaignToCreator,
   creatorsFromCurrentUser,
   creatorsFromStream,
-  extractCampaignId,
+  isCampaignId,
   mergeCreators,
   parseCreatorRef,
   type JsonApiResource
@@ -47,6 +49,21 @@ interface JsonApiDoc<T> {
 }
 
 const CAMPAIGN_FIELDS = 'fields[campaign]=name,url,avatar_photo_url,vanity'
+
+/**
+ * A campaign with its creator user (for matching a page's vanity / user id), or
+ * an empty doc when the response isn't that campaign.
+ */
+async function fetchCampaign(
+  ctx: ServiceContext,
+  campaignId: string
+): Promise<JsonApiDoc<JsonApiResource>> {
+  const res = await ctx.fetchJson<JsonApiDoc<JsonApiResource>>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}?${V}&${CAMPAIGN_FIELDS}` +
+      '&include=creator&fields[user]=vanity,url&json-api-use-default-includes=false'
+  )
+  return res.data?.type === 'campaign' && res.data.id === campaignId ? res : {}
+}
 
 /**
  * Home-feed pages walked to find followed (free) creators. Each page costs one
@@ -126,32 +143,36 @@ export const patreonService: Service = {
   async resolveCreator(ctx: ServiceContext, pageUrl: string): Promise<Creator | null> {
     const ref = parseCreatorRef(pageUrl)
     if (!ref) return null
-    let campaignId: string | null = null
     if (ref.kind === 'campaign') {
-      campaignId = ref.campaignId
-    } else if (ref.kind === 'post') {
+      const res = await fetchCampaign(ctx, ref.campaignId)
+      return res.data ? campaignToCreator(res.data, false) : null
+    }
+    if (ref.kind === 'post') {
       // A post names its campaign; no HTML scraping needed.
       const res = await ctx.fetchJson<JsonApiDoc<JsonApiResource>>(
         `${API}/posts/${encodeURIComponent(ref.postId)}?${V}` +
           `&include=campaign&${CAMPAIGN_FIELDS}&json-api-use-default-includes=false`
       )
       const link = res.data?.relationships?.campaign?.data
-      campaignId =
+      const campaignId =
         (link && !Array.isArray(link) ? link.id : undefined) ??
-        res.included?.find((r) => r.type === 'campaign')?.id ??
-        null
-    } else {
-      campaignId = extractCampaignId(await ctx.fetchText(ref.url))
+        res.included?.find((r) => r.type === 'campaign')?.id
+      if (!isCampaignId(campaignId)) return null
+      const campaign = await fetchCampaign(ctx, campaignId)
+      return campaign.data ? campaignToCreator(campaign.data, false) : null
     }
-    if (!campaignId) return null
-    // Confirm the campaign exists and get its name/avatar/page.
-    const res = await ctx.fetchJson<JsonApiDoc<JsonApiResource>>(
-      `${API}/campaigns/${encodeURIComponent(campaignId)}?${V}&${CAMPAIGN_FIELDS}` +
-        '&json-api-use-default-includes=false'
-    )
-    if (res.data?.type !== 'campaign') return null
-    // Added creators are free memberships unless the listing finds a pledge.
-    return campaignToCreator(res.data, false)
+    // A creator page: ids found in its HTML are only candidates (one may come
+    // from a post title or another creator), so each is confirmed against the
+    // page's vanity / user id before it is accepted.
+    for (const campaignId of campaignIdCandidates(await ctx.fetchText(ref.url))) {
+      ctx.signal.throwIfAborted()
+      const res = await fetchCampaign(ctx, campaignId)
+      if (res.data && campaignMatchesRef(res.data, res.included, ref)) {
+        // Added creators are free memberships unless the listing finds a pledge.
+        return campaignToCreator(res.data, false)
+      }
+    }
+    return null
   },
 
   async *listPosts(ctx: ServiceContext, creatorId: string): AsyncIterable<Post> {

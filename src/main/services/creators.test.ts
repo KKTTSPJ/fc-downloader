@@ -23,4 +23,21 @@ describe('mergeAddedCreators', () => {
   it('handles no added creators', () => {
     expect(mergeAddedCreators([c('1')], undefined)).toEqual([c('1')])
   })
+
+  it('drops added creators with an unsafe id and off-site page URLs', () => {
+    const out = mergeAddedCreators(
+      [],
+      [
+        c('..'),
+        c(''),
+        c('a/b'),
+        c('7', { pageUrl: 'https://www.patreon.com/examplecreator' }),
+        c('8', { pageUrl: 'https://example.invalid/x' })
+      ]
+    )
+    expect(out.map((x) => [x.creatorId, x.pageUrl])).toEqual([
+      ['7', 'https://www.patreon.com/examplecreator'],
+      ['8', undefined]
+    ])
+  })
 })

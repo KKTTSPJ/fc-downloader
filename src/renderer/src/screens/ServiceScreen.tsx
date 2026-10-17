@@ -14,6 +14,7 @@ import {
   type PeriodPref
 } from '@shared/period'
 import { CREATOR_ADD_SERVICES } from '@shared/constants'
+import { safeCreatorPageUrl } from '@shared/creatorUrl'
 
 /** Public web page for a creator, for jumping the embedded browser to it.
  *  Patreon's creatorId is a campaign id with no clean public URL, so it uses
@@ -28,7 +29,8 @@ function creatorPageUrl(serviceId: ServiceId, creatorId: string, pageUrl?: strin
     case 'cien':
       return `https://ci-en.dlsite.com/creator/${id}`
     default:
-      return pageUrl ?? null
+      // An API-provided URL: only an https page on the service's own site.
+      return safeCreatorPageUrl(serviceId, pageUrl) ?? null
   }
 }
 
@@ -805,7 +807,8 @@ function SettingsPanel({
       .then((res) => {
         if (res.ok) {
           const tpl = known.has(res.creator.creatorId) ? L.addCreatorExists : L.addCreatorDone
-          setAddNote({ text: tpl.replace('{name}', res.creator.name), ok: true })
+          // A function replacement: a `$&` / `$'` in the name stays literal.
+          setAddNote({ text: tpl.replace('{name}', () => res.creator.name), ok: true })
         } else setAddNote({ text: L.addCreatorNotFound, ok: false })
       })
       .catch(() => setAddNote({ text: L.addCreatorFailed, ok: false }))

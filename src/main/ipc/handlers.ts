@@ -13,6 +13,7 @@ import type {
 import { listServices } from '@main/services/registry'
 import { createServiceContext } from '@main/services/context'
 import { findNewCreators } from '@main/services/newposts'
+import { isSafeCreatorId } from '@shared/creatorUrl'
 import {
   listCreatorsWithAdded,
   removeAddedCreator,
@@ -113,7 +114,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       ctx.log('warn', 'resolveCreator failed', err)
       return null
     })
-    if (!creator) return { ok: false, reason: 'notFound' }
+    if (!creator || !isSafeCreatorId(creator.creatorId)) return { ok: false, reason: 'notFound' }
     saveAddedCreator(creator)
     return { ok: true, creator: { ...creator, added: true } }
   })

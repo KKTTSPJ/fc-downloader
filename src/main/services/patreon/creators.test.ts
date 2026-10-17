@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  campaignIdCandidates,
+  campaignMatchesRef,
+  campaignToCreator,
   creatorsFromCurrentUser,
   creatorsFromStream,
-  extractCampaignId,
   mergeCreators,
   parseCreatorRef,
   type JsonApiResource
@@ -69,22 +71,18 @@ describe('creatorsFromStream + mergeCreators', () => {
 })
 
 describe('parseCreatorRef', () => {
+  const page = (vanity: string): object => ({
+    kind: 'page',
+    url: `https://www.patreon.com/${vanity}`,
+    vanity
+  })
   it.each([
-    [
-      'https://www.patreon.com/examplecreator',
-      { kind: 'page', url: 'https://www.patreon.com/examplecreator' }
-    ],
-    [
-      'https://www.patreon.com/c/examplecreator/posts',
-      { kind: 'page', url: 'https://www.patreon.com/examplecreator' }
-    ],
-    [
-      'https://patreon.com/cw/examplecreator',
-      { kind: 'page', url: 'https://www.patreon.com/examplecreator' }
-    ],
+    ['https://www.patreon.com/examplecreator', page('examplecreator')],
+    ['https://www.patreon.com/c/examplecreator/posts', page('examplecreator')],
+    ['https://patreon.com/cw/examplecreator', page('examplecreator')],
     [
       'https://www.patreon.com/user?u=123',
-      { kind: 'page', url: 'https://www.patreon.com/user?u=123' }
+      { kind: 'page', url: 'https://www.patreon.com/user?u=123', userId: '123' }
     ],
     ['https://www.patreon.com/posts/some-title-98765', { kind: 'post', postId: '98765' }],
     ['https://www.patreon.com/posts/98765?utm_source=x', { kind: 'post', postId: '98765' }],
@@ -98,6 +96,10 @@ describe('parseCreatorRef', () => {
     'https://www.patreon.com/settings/memberships',
     'https://www.patreon.com/',
     'https://www.patreon.com/posts/no-id-here',
+    'https://www.patreon.com/pricing',
+    'https://www.patreon.com/profile?u=',
+    'https://www.patreon.com/user',
+    'http://www.patreon.com/examplecreator',
     'https://example.com/examplecreator',
     'https://www.patreon.com.evil.invalid/examplecreator',
     'not a url'
@@ -106,30 +108,97 @@ describe('parseCreatorRef', () => {
   })
 })
 
-describe('extractCampaignId', () => {
-  it('reads the Next.js bootstrap', () => {
+describe('campaignToCreator validation', () => {
+  it('drops a campaign whose id is not all digits', () => {
+    expect(campaignToCreator({ id: '..', type: 'campaign' }, false)).toBeNull()
+    expect(campaignToCreator({ id: '', type: 'campaign' }, false)).toBeNull()
+    expect(creatorsFromStream([{ id: '../x', type: 'campaign' }, campaign('7')])).toHaveLength(1)
+    expect(creatorsFromCurrentUser([{ id: 'a/b', type: 'campaign' }])).toEqual([])
+  })
+
+  it('keeps only an https patreon.com page URL', () => {
+    const withUrl = (url: string): string | undefined =>
+      campaignToCreator({ id: '1', type: 'campaign', attributes: { url } }, false)?.pageUrl
+    expect(withUrl('https://www.patreon.com/examplecreator')).toBe(
+      'https://www.patreon.com/examplecreator'
+    )
+    expect(withUrl('https://patreon.com/c/examplecreator')).toBe(
+      'https://patreon.com/c/examplecreator'
+    )
+    expect(withUrl('http://www.patreon.com/examplecreator')).toBeUndefined()
+    expect(withUrl('https://example.invalid/phish')).toBeUndefined()
+    expect(withUrl('javascript:alert(1)')).toBeUndefined()
+  })
+})
+
+describe('campaignIdCandidates', () => {
+  it('puts the Next.js bootstrap first', () => {
     const data = {
       props: {
         pageProps: { bootstrapEnvelope: { pageBootstrap: { campaign: { data: { id: '111' } } } } }
       }
     }
-    const html = `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script></html>`
-    expect(extractCampaignId(html)).toBe('111')
+    const html =
+      String.raw`{\"campaign\":{\"data\":{\"id\":\"999\"` +
+      `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(data)}</script>`
+    expect(campaignIdCandidates(html)).toEqual(['111', '999'])
   })
 
-  it('reads a JSON-escaped streamed payload fragment', () => {
-    const html = String.raw`self.__next_f.push([1,"{\"value\":{\"campaign\":{\"data\":{\"id\":\"222\",\"type\":\"campaign\"}}}}"])`
-    expect(extractCampaignId(html)).toBe('222')
+  it('collects every fragment and self link, de-duplicated and capped', () => {
+    const html =
+      String.raw`{\"value\":{\"campaign\":{\"data\":{\"id\":\"222\"}}}}` +
+      ' window.patreon = {"bootstrap": {"campaign": {"data": {"id": "333"}}}}' +
+      ' "self": "https://www.patreon.com/api/campaigns/222"' +
+      ' "self": "https://www.patreon.com/api/campaigns/444"' +
+      ' "self": "https://www.patreon.com/api/campaigns/555"'
+    expect(campaignIdCandidates(html)).toEqual(['222', '333', '444'])
   })
 
-  it('reads a plain bootstrap and a campaign self link', () => {
+  it('returns nothing when absent', () => {
+    expect(campaignIdCandidates('<html>nothing</html>')).toEqual([])
+  })
+})
+
+describe('campaignMatchesRef', () => {
+  const camp = (attrs: Record<string, unknown>, creatorId = '50'): JsonApiResource => ({
+    id: '1',
+    type: 'campaign',
+    attributes: attrs,
+    relationships: { creator: { data: { id: creatorId, type: 'user' } } }
+  })
+  const user: JsonApiResource = {
+    id: '50',
+    type: 'user',
+    attributes: { vanity: 'ownername', url: 'https://www.patreon.com/ownername' }
+  }
+
+  it('matches the page vanity against the campaign or its creator', () => {
     expect(
-      extractCampaignId('window.patreon = {"bootstrap": {"campaign": {"data": {"id": "333"}}}}')
-    ).toBe('333')
-    expect(extractCampaignId('"self": "https://www.patreon.com/api/campaigns/444"')).toBe('444')
+      campaignMatchesRef(camp({ vanity: 'ExampleCreator' }), [], { vanity: 'examplecreator' })
+    ).toBe(true)
+    expect(
+      campaignMatchesRef(camp({ url: 'https://www.patreon.com/c/examplecreator' }), [], {
+        vanity: 'examplecreator'
+      })
+    ).toBe(true)
+    expect(campaignMatchesRef(camp({}), [user], { vanity: 'ownername' })).toBe(true)
   })
 
-  it('returns null when absent', () => {
-    expect(extractCampaignId('<html>nothing</html>')).toBeNull()
+  it('matches a /user?u= page by the creator id', () => {
+    expect(campaignMatchesRef(camp({}), [], { userId: '50' })).toBe(true)
+    expect(campaignMatchesRef(camp({}), [], { userId: '51' })).toBe(false)
+  })
+
+  it('rejects a campaign id that merely appeared on the page', () => {
+    expect(
+      campaignMatchesRef(
+        camp({ vanity: 'someoneelse', url: 'https://www.patreon.com/someoneelse' }),
+        [user],
+        {
+          vanity: 'examplecreator'
+        }
+      )
+    ).toBe(false)
+    expect(campaignMatchesRef(camp({}), [], {})).toBe(false)
   })
 })

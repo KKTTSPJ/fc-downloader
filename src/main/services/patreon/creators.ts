@@ -9,9 +9,15 @@
  *    post's campaign, so walking a few pages finds the followed creators that
  *    posted recently;
  *  - the user can add any creator from its page (`parseCreatorRef` +
- *    `extractCampaignId`), the way gallery-dl resolves a creator URL.
+ *    `campaignIdCandidates`, each candidate confirmed against the page with
+ *    `campaignMatchesRef`), the way gallery-dl resolves a creator URL.
+ *
+ * Campaign ids and URLs from these responses become folder names and are
+ * opened in the embedded browser, so they are validated here: a campaign id
+ * must be all digits, a page URL an https patreon.com page.
  */
 import type { Creator } from '@shared/types'
+import { isServicePageUrl, safeCreatorPageUrl } from '@shared/creatorUrl'
 
 const ORIGIN = 'https://www.patreon.com'
 
@@ -36,15 +42,25 @@ interface CampaignAttributes {
   avatar_photo_url?: string
 }
 
-/** A campaign resource as a Creator (`supporting` per the caller's source). */
-export function campaignToCreator(res: JsonApiResource, supporting: boolean): Creator {
+/** A Patreon campaign id: digits only (it becomes a folder name). */
+export function isCampaignId(id: unknown): id is string {
+  return typeof id === 'string' && /^\d+$/.test(id)
+}
+
+/**
+ * A campaign resource as a Creator (`supporting` per the caller's source), or
+ * null when its id isn't a campaign id. The page URL is kept only when it is an
+ * https patreon.com page.
+ */
+export function campaignToCreator(res: JsonApiResource, supporting: boolean): Creator | null {
+  if (!isCampaignId(res.id)) return null
   const a = (res.attributes ?? {}) as CampaignAttributes
   return {
     serviceId: 'patreon',
     creatorId: res.id,
     name: a.name || a.vanity || `campaign-${res.id}`,
     iconUrl: a.avatar_photo_url || undefined,
-    pageUrl: a.url || undefined,
+    pageUrl: safeCreatorPageUrl('patreon', a.url),
     supporting
   }
 }
@@ -75,7 +91,8 @@ export function creatorsFromCurrentUser(included: JsonApiResource[] | undefined)
     // Without pledge/member linkage (fields trimmed away) fall back to "paid":
     // that was the only source before free memberships were looked up.
     const free = memberOnly.has(r.id) && !pledged.has(r.id)
-    out.set(r.id, campaignToCreator(r, !free))
+    const creator = campaignToCreator(r, !free)
+    if (creator) out.set(r.id, creator)
   }
   return [...out.values()]
 }
@@ -85,6 +102,7 @@ export function creatorsFromStream(included: JsonApiResource[] | undefined): Cre
   return (included ?? [])
     .filter((r) => r.type === 'campaign')
     .map((r) => campaignToCreator(r, false))
+    .filter((c): c is Creator => c !== null)
 }
 
 /** Merge creator sources in priority order (an earlier entry wins). */
@@ -100,7 +118,9 @@ export function mergeCreators(...sources: Creator[][]): Creator[] {
 export type CreatorRef =
   | { kind: 'campaign'; campaignId: string }
   | { kind: 'post'; postId: string }
-  | { kind: 'page'; url: string }
+  /** A creator page: fetch `url` and confirm the campaign by `vanity` (a
+   *  `/<vanity>` page) or `userId` (a `/user?u=<id>` page). */
+  | { kind: 'page'; url: string; vanity?: string; userId?: string }
 
 /** First path segments that are site pages, not creators. */
 const RESERVED = new Set([
@@ -118,7 +138,19 @@ const RESERVED = new Set([
   'api',
   'auth',
   'checkout',
-  'join'
+  'join',
+  'profile',
+  'user',
+  'pricing',
+  'about',
+  'apps',
+  'blog',
+  'help',
+  'privacy',
+  'terms',
+  'legal',
+  'features',
+  'product'
 ])
 
 /**
@@ -128,14 +160,8 @@ const RESERVED = new Set([
  * anything else (other sites, the home feed, settings, ...).
  */
 export function parseCreatorRef(pageUrl: string): CreatorRef | null {
-  let u: URL
-  try {
-    u = new URL(pageUrl.trim())
-  } catch {
-    return null
-  }
-  if (!/^https?:$/.test(u.protocol)) return null
-  if (u.hostname !== 'patreon.com' && u.hostname !== 'www.patreon.com') return null
+  if (!isServicePageUrl('patreon', pageUrl.trim())) return null
+  const u = new URL(pageUrl.trim())
 
   const cid = u.searchParams.get('c') ?? u.searchParams.get('campaign_id')
   if (cid && /^\d+$/.test(cid)) return { kind: 'campaign', campaignId: cid }
@@ -146,13 +172,15 @@ export function parseCreatorRef(pageUrl: string): CreatorRef | null {
     return m ? { kind: 'post', postId: m[1] } : null
   }
   const userId = u.searchParams.get('u')
-  if ((segs[0] === 'user' || segs[0] === 'profile') && userId && /^\d+$/.test(userId)) {
-    return { kind: 'page', url: `${ORIGIN}/user?u=${userId}` }
+  if (segs[0] === 'user' || segs[0] === 'profile') {
+    return userId && /^\d+$/.test(userId)
+      ? { kind: 'page', url: `${ORIGIN}/user?u=${userId}`, userId }
+      : null
   }
   const vanity = segs[0] === 'c' || segs[0] === 'cw' ? segs[1] : segs[0]
-  if (!vanity || RESERVED.has(vanity.toLowerCase()) || segs[0] === 'user') return null
+  if (!vanity || RESERVED.has(vanity.toLowerCase())) return null
   if (!/^[\w.-]+$/.test(vanity)) return null
-  return { kind: 'page', url: `${ORIGIN}/${vanity}` }
+  return { kind: 'page', url: `${ORIGIN}/${vanity}`, vanity }
 }
 
 /** Walk a parsed object path, returning undefined on any missing step. */
@@ -165,34 +193,83 @@ function dig(obj: unknown, path: string[]): unknown {
   return cur
 }
 
+/** Most campaign ids taken from one page (each costs a confirming request). */
+const MAX_CANDIDATES = 3
+
 /**
- * The campaign id embedded in a creator page's HTML, tried in the orders
- * gallery-dl and AtelierMisaka use across Patreon's page generations:
+ * Campaign ids found in a creator page's HTML, most trustworthy first and
+ * de-duplicated, tried in the orders gallery-dl and AtelierMisaka use across
+ * Patreon's page generations:
  *  1. Next.js `__NEXT_DATA__` → props.pageProps.bootstrapEnvelope
  *     .(pageBootstrap|bootstrap).campaign.data.id
- *  2. a `"campaign":{"data":{"id":"<n>"` fragment (plain or JSON-escaped, as in
+ *  2. `"campaign":{"data":{"id":"<n>"` fragments (plain or JSON-escaped, as in
  *     the streamed Next.js payload)
- *  3. a `https://www.patreon.com/api/campaigns/<n>` self link
+ *  3. `https://www.patreon.com/api/campaigns/<n>` self links
+ * Text matches can come from anywhere on the page (a post title, another
+ * creator), so every candidate must be confirmed with `campaignMatchesRef`.
  */
-export function extractCampaignId(html: string): string | null {
+export function campaignIdCandidates(html: string): string[] {
+  const out: string[] = []
+  const add = (id: unknown): void => {
+    if (isCampaignId(id) && !out.includes(id)) out.push(id)
+  }
   const next = /<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/.exec(html)
   if (next) {
     try {
       const data: unknown = JSON.parse(next[1])
       const env = dig(data, ['props', 'pageProps', 'bootstrapEnvelope'])
-      for (const key of ['pageBootstrap', 'bootstrap']) {
-        const id = dig(env, [key, 'campaign', 'data', 'id'])
-        if (typeof id === 'string' && /^\d+$/.test(id)) return id
-      }
+      for (const key of ['pageBootstrap', 'bootstrap'])
+        add(dig(env, [key, 'campaign', 'data', 'id']))
     } catch {
       /* fall through to the text patterns */
     }
   }
   const q = String.raw`\\*"`
   const frag = new RegExp(
-    `${q}campaign${q}\\s*:\\s*\\{\\s*${q}data${q}\\s*:\\s*\\{\\s*${q}id${q}\\s*:\\s*${q}(\\d+)`
-  ).exec(html)
-  if (frag) return frag[1]
-  const self = /patreon\.com\/api\/campaigns\/(\d+)/.exec(html)
-  return self ? self[1] : null
+    `${q}campaign${q}\\s*:\\s*\\{\\s*${q}data${q}\\s*:\\s*\\{\\s*${q}id${q}\\s*:\\s*${q}(\\d+)`,
+    'g'
+  )
+  for (const m of html.matchAll(frag)) add(m[1])
+  for (const m of html.matchAll(/patreon\.com\/api\/campaigns\/(\d+)/g)) add(m[1])
+  return out.slice(0, MAX_CANDIDATES)
+}
+
+/** The vanity a patreon.com page URL names (`/<v>`, `/c/<v>`, `/cw/<v>`). */
+function vanityOf(url: unknown): string | undefined {
+  if (typeof url !== 'string' || !isServicePageUrl('patreon', url)) return undefined
+  const segs = new URL(url).pathname.split('/').filter(Boolean)
+  return (segs[0] === 'c' || segs[0] === 'cw' ? segs[1] : segs[0])?.toLowerCase()
+}
+
+/**
+ * Whether a campaign (from `/api/campaigns/<id>?include=creator`) belongs to
+ * the creator page the user is on: the page's vanity equals the campaign's (or
+ * its creator's) vanity or its page URL's, or the page's `?u=` user id is the
+ * campaign's creator. Rejects a campaign id that merely appeared on the page.
+ */
+export function campaignMatchesRef(
+  campaign: JsonApiResource,
+  included: JsonApiResource[] | undefined,
+  ref: { vanity?: string; userId?: string }
+): boolean {
+  const a = (campaign.attributes ?? {}) as CampaignAttributes
+  const creatorId = linkedIds(campaign, 'creator')[0]
+  const creator = included?.find((r) => r.type === 'user' && r.id === creatorId)
+  if (ref.userId) {
+    if (creatorId === ref.userId) return true
+    try {
+      return !!a.url && new URL(a.url).searchParams.get('u') === ref.userId
+    } catch {
+      return false
+    }
+  }
+  const want = ref.vanity?.toLowerCase()
+  if (!want) return false
+  const names = [
+    a.vanity,
+    (creator?.attributes as { vanity?: string } | undefined)?.vanity,
+    vanityOf(a.url),
+    vanityOf((creator?.attributes as { url?: string } | undefined)?.url)
+  ]
+  return names.some((n) => typeof n === 'string' && n.toLowerCase() === want)
 }
