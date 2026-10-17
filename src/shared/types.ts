@@ -35,6 +35,12 @@ export interface Creator {
    *  - `undefined`  unknown — the service can't cheaply tell the two apart.
    */
   supporting?: boolean
+  /** The creator's web page, when the service id alone can't build one (e.g. a
+   *  Patreon campaign id). Lets the UI open it in the embedded browser. */
+  pageUrl?: string
+  /** Added by the user from a creator page (`creators:add`) rather than found
+   *  by the service's own listing; the UI lets the user remove it again. */
+  added?: boolean
 }
 
 /** A single post (the unit of dedup and of a viewer folder). */
@@ -205,6 +211,10 @@ export interface AppSettings {
    *  often reuse one, so every saved password is also tried as a candidate for
    *  other posts before asking again. */
   zipPasswords?: Record<string, string>
+  /** Creators the user added from a creator page, per service, for services
+   *  whose listing can't find them all (Patreon free memberships). Merged into
+   *  the service's creator list. */
+  addedCreators?: Partial<Record<ServiceId, Creator[]>>
 }
 
 /**

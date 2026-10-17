@@ -15,6 +15,7 @@ import type {
 } from '@shared/types'
 import { getService } from '@main/services/registry'
 import { createServiceContext } from '@main/services/context'
+import { listCreatorsWithAdded } from '@main/services/creators'
 import { downloadToFile } from '@main/session/manager'
 import { dedupeFileNames, postDir, sanitizeFileName, toLocationParts } from '@main/storage/layout'
 import { getThumbnail } from '@main/storage/thumbnails'
@@ -143,7 +144,7 @@ export class DownloadEngine {
 
     try {
       // Resolve display names for the ledger (best-effort; falls back to ids).
-      const allCreators = await service.listCreators(ctx).catch((err) => {
+      const allCreators = await listCreatorsWithAdded(service, ctx).catch((err) => {
         ctx.log('warn', 'listCreators failed; creator names unavailable', err)
         return []
       })

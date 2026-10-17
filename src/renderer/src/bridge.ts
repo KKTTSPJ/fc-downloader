@@ -5,7 +5,7 @@
  * (e.g. the renderer opened in a plain browser preview, where `window.api`
  * is undefined and there is no preload bridge).
  */
-import type { ExtractResult, IpcEvents, RendererApi } from '@shared/ipc'
+import type { AddCreatorResult, ExtractResult, IpcEvents, RendererApi } from '@shared/ipc'
 import type {
   AppSettings,
   Creator,
@@ -45,6 +45,11 @@ export const bridge = {
     api?.['creators:list'](id) ?? Promise.resolve([]),
   checkNewCreators: (id: ServiceId): Promise<string[]> =>
     api?.['creators:checkNew'](id) ?? Promise.resolve([]),
+  addCreator: (id: ServiceId, pageUrl: string): Promise<AddCreatorResult> =>
+    api?.['creators:add'](id, pageUrl) ??
+    Promise.resolve({ ok: false, reason: 'unsupported' } as AddCreatorResult),
+  removeCreator: (id: ServiceId, creatorId: string): Promise<void> =>
+    api?.['creators:remove'](id, creatorId) ?? Promise.resolve(),
   onAuthChanged: (cb: (p: IpcEvents['services:authChanged']) => void): (() => void) =>
     api ? api.on('services:authChanged', cb) : noop,
 

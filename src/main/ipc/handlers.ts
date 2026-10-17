@@ -13,6 +13,12 @@ import type {
 import { listServices } from '@main/services/registry'
 import { createServiceContext } from '@main/services/context'
 import { findNewCreators } from '@main/services/newposts'
+import { isSafeCreatorId } from '@shared/creatorUrl'
+import {
+  listCreatorsWithAdded,
+  removeAddedCreator,
+  saveAddedCreator
+} from '@main/services/creators'
 import { clearSession } from '@main/session/manager'
 import { getSettings, updateSettings } from '@main/storage/settings'
 import { buildViewerTree } from '@main/storage/viewer'
@@ -96,7 +102,25 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
         }
       }
     })
-    return svc.listCreators(ctx)
+    return listCreatorsWithAdded(svc, ctx)
+  })
+
+  handle('creators:add', async (serviceId, pageUrl) => {
+    const svc = listServices().find((s) => s.id === serviceId)
+    if (!svc?.resolveCreator) return { ok: false, reason: 'unsupported' }
+    const ac = new AbortController()
+    const ctx = createServiceContext(serviceId, ac.signal)
+    const creator = await svc.resolveCreator(ctx, pageUrl).catch((err) => {
+      ctx.log('warn', 'resolveCreator failed', err)
+      return null
+    })
+    if (!creator || !isSafeCreatorId(creator.creatorId)) return { ok: false, reason: 'notFound' }
+    saveAddedCreator(creator)
+    return { ok: true, creator: { ...creator, added: true } }
+  })
+
+  handle('creators:remove', async (serviceId, creatorId) => {
+    removeAddedCreator(serviceId, creatorId)
   })
 
   handle('creators:checkNew', async (serviceId) => {
@@ -331,7 +355,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       const ac = new AbortController()
       const ctx = createServiceContext(serviceId, ac.signal)
       // Resolve live icon URLs (needs login; returns [] otherwise — best effort).
-      const creators = await svc.listCreators(ctx).catch(() => [])
+      const creators = await listCreatorsWithAdded(svc, ctx).catch(() => [])
       const iconById = new Map(creators.map((c) => [c.creatorId, c.iconUrl]))
       for (const creatorId of creatorIds) {
         const iconUrl = iconById.get(creatorId)

@@ -8,6 +8,8 @@ const invokeChannels: IpcChannel[] = [
   'services:clearSession',
   'creators:list',
   'creators:checkNew',
+  'creators:add',
+  'creators:remove',
   'download:start',
   'download:cancel',
   'download:status',

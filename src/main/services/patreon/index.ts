@@ -8,14 +8,27 @@
  *
  * Verified against the live API with a logged-in session (2026-06-08):
  *   - checkAuth: GET /api/current_user → 200 `{ data: { id, type: "user" } }`.
- *   - the current_user `memberships` / `pledges` relationships exist (they were
- *     empty for the probe account, which supported no campaigns).
+ *   - the current_user `memberships` / `pledges` relationships exist.
+ * Verified by a user (2026-10): paid creators arrive via `pledges`; free
+ * memberships appear in neither, but their posts are in the home feed
+ * (`/api/stream?filter[is_following]=true`) — see ./creators.ts.
  * The campaign-posts + media enumeration is structured from Patreon's JSON:API
  * but is marked `VERIFY:` until confirmed against an account with an active
  * pledge — see scripts/probe-patreon.cjs and docs/spec/service-abstraction.md.
  */
 import type { Creator, Post } from '@shared/types'
 import type { Service, ServiceContext } from '../types'
+import {
+  campaignIdCandidates,
+  campaignMatchesRef,
+  campaignToCreator,
+  creatorsFromCurrentUser,
+  creatorsFromStream,
+  isCampaignId,
+  mergeCreators,
+  parseCreatorRef,
+  type JsonApiResource
+} from './creators'
 import {
   mediaMapFromIncluded,
   normalizePost,
@@ -31,14 +44,57 @@ const V = 'json-api-version=1.0'
 
 interface JsonApiDoc<T> {
   data?: T
-  included?: Array<{ id: string; type: string; attributes?: Record<string, unknown> }>
+  included?: JsonApiResource[]
   links?: { next?: string | null }
 }
 
-interface RawCampaign {
-  id: string
-  type: 'campaign'
-  attributes?: { name?: string; vanity?: string; avatar_photo_url?: string; url?: string }
+const CAMPAIGN_FIELDS = 'fields[campaign]=name,url,avatar_photo_url,vanity'
+
+/**
+ * A campaign with its creator user (for matching a page's vanity / user id), or
+ * an empty doc when the response isn't that campaign.
+ */
+async function fetchCampaign(
+  ctx: ServiceContext,
+  campaignId: string
+): Promise<JsonApiDoc<JsonApiResource>> {
+  const res = await ctx.fetchJson<JsonApiDoc<JsonApiResource>>(
+    `${API}/campaigns/${encodeURIComponent(campaignId)}?${V}&${CAMPAIGN_FIELDS}` +
+      '&include=creator&fields[user]=vanity,url&json-api-use-default-includes=false'
+  )
+  return res.data?.type === 'campaign' && res.data.id === campaignId ? res : {}
+}
+
+/**
+ * Home-feed pages walked to find followed (free) creators. Each page costs one
+ * throttled request; a few pages reach the creators that posted recently.
+ */
+const STREAM_PAGES = 5
+
+/**
+ * Followed creators from the home feed: `/api/stream?filter[is_following]=true`
+ * (gallery-dl's "user" extractor) lists posts of every followed creator,
+ * newest first, each with its campaign. Verified 2026-10 to include free
+ * memberships' recent posts. Best-effort: a failed page ends the walk.
+ */
+async function followedFromStream(ctx: ServiceContext): Promise<Creator[]> {
+  const found: Creator[][] = []
+  let url: string | null =
+    `${API}/stream?${V}&include=campaign&${CAMPAIGN_FIELDS}&fields[post]=published_at` +
+    '&filter[is_following]=true&json-api-use-default-includes=false'
+  for (let page = 0; page < STREAM_PAGES && url; page++) {
+    ctx.signal.throwIfAborted()
+    try {
+      const doc: JsonApiDoc<unknown> = await ctx.fetchJson<JsonApiDoc<unknown>>(url)
+      found.push(creatorsFromStream(doc.included))
+      url = doc.links?.next ?? null
+    } catch (err) {
+      ctx.log('warn', 'listCreators: home feed page failed', err)
+      break
+    }
+    ctx.progress?.(page + 2, STREAM_PAGES + 1)
+  }
+  return mergeCreators(...found)
 }
 
 export const patreonService: Service = {
@@ -64,35 +120,59 @@ export const patreonService: Service = {
   },
 
   async listCreators(ctx: ServiceContext): Promise<Creator[]> {
-    // The campaigns a user supports are reachable through the current_user
-    // memberships + pledges relationships; the campaign resources arrive in
-    // `included`. (VERIFY: confirm against an account with active pledges.)
-    const include = ['memberships.campaign.creator', 'pledges.campaign.creator'].join(',')
-    const fields = [
-      'fields[campaign]=name,url,avatar_photo_url,vanity',
-      'fields[user]=full_name,image_url,url,vanity'
-    ].join('&')
+    // Paid memberships come from current_user's pledges; free memberships are
+    // listed nowhere, so the followed creators that posted recently are picked
+    // up from the home feed (others are added by the user from their page —
+    // see resolveCreator). Paid entries win over the feed's.
+    ctx.progress?.(0, STREAM_PAGES + 1)
+    let paid: Creator[] = []
     try {
+      const include = 'memberships.campaign,pledges.campaign'
       const res = await ctx.fetchJson<JsonApiDoc<unknown>>(
-        `${API}/current_user?${V}&include=${encodeURIComponent(include)}&${fields}`
+        `${API}/current_user?${V}&include=${encodeURIComponent(include)}&${CAMPAIGN_FIELDS}`
       )
-      const byId = new Map<string, Creator>()
-      for (const inc of res.included ?? []) {
-        if (inc.type !== 'campaign') continue
-        const c = inc as RawCampaign
-        if (byId.has(c.id)) continue
-        byId.set(c.id, {
-          serviceId: 'patreon',
-          creatorId: c.id,
-          name: c.attributes?.name || c.attributes?.vanity || `campaign-${c.id}`,
-          iconUrl: c.attributes?.avatar_photo_url
-        })
-      }
-      return [...byId.values()]
+      paid = creatorsFromCurrentUser(res.included)
     } catch (err) {
-      ctx.log('error', 'listCreators failed', err)
-      return []
+      ctx.log('error', 'listCreators: current_user failed', err)
     }
+    ctx.progress?.(1, STREAM_PAGES + 1)
+    const followed = await followedFromStream(ctx)
+    return mergeCreators(paid, followed)
+  },
+
+  async resolveCreator(ctx: ServiceContext, pageUrl: string): Promise<Creator | null> {
+    const ref = parseCreatorRef(pageUrl)
+    if (!ref) return null
+    if (ref.kind === 'campaign') {
+      const res = await fetchCampaign(ctx, ref.campaignId)
+      return res.data ? campaignToCreator(res.data, false) : null
+    }
+    if (ref.kind === 'post') {
+      // A post names its campaign; no HTML scraping needed.
+      const res = await ctx.fetchJson<JsonApiDoc<JsonApiResource>>(
+        `${API}/posts/${encodeURIComponent(ref.postId)}?${V}` +
+          `&include=campaign&${CAMPAIGN_FIELDS}&json-api-use-default-includes=false`
+      )
+      const link = res.data?.relationships?.campaign?.data
+      const campaignId =
+        (link && !Array.isArray(link) ? link.id : undefined) ??
+        res.included?.find((r) => r.type === 'campaign')?.id
+      if (!isCampaignId(campaignId)) return null
+      const campaign = await fetchCampaign(ctx, campaignId)
+      return campaign.data ? campaignToCreator(campaign.data, false) : null
+    }
+    // A creator page: ids found in its HTML are only candidates (one may come
+    // from a post title or another creator), so each is confirmed against the
+    // page's vanity / user id before it is accepted.
+    for (const campaignId of campaignIdCandidates(await ctx.fetchText(ref.url))) {
+      ctx.signal.throwIfAborted()
+      const res = await fetchCampaign(ctx, campaignId)
+      if (res.data && campaignMatchesRef(res.data, res.included, ref)) {
+        // Added creators are free memberships unless the listing finds a pledge.
+        return campaignToCreator(res.data, false)
+      }
+    }
+    return null
   },
 
   async *listPosts(ctx: ServiceContext, creatorId: string): AsyncIterable<Post> {
