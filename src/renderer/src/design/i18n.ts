@@ -186,6 +186,7 @@ export const LANG: Record<Lang, Dict> = {
       '使える変数: {year} {month} {day} {postId} {title}（/ で階層を作成、日付は UTC）',
     folderPreview: '例',
     folderErrEmpty: '空にはできません',
+    folderReset: '初期値に戻す',
     folderErrUnknownToken: '使えない変数が含まれています',
     folderErrMissingPostId: '{postId} を含めてください',
     creatorFolderNoIdWarn:
@@ -398,6 +399,7 @@ export const LANG: Record<Lang, Dict> = {
       "Variables: {year} {month} {day} {postId} {title} (/ makes subfolders; dates are UTC)",
     folderPreview: 'Example',
     folderErrEmpty: "Can't be empty",
+    folderReset: 'Reset to default',
     folderErrUnknownToken: 'Contains an unknown variable',
     folderErrMissingPostId: 'Must include {postId}',
     creatorFolderNoIdWarn:

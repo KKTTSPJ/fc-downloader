@@ -134,19 +134,22 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
 /**
  * A folder-name pattern field that commits on blur / Enter. An invalid entry is
  * kept for editing (with the reason shown) and not saved; committing the
- * default clears the setting.
+ * default clears the setting. "Reset" (shown only off the default) clears it
+ * too, so the default never has to be retyped.
  */
 function PatternInput({
   value,
   defaultPattern,
   validate,
   errorText,
+  resetLabel,
   onCommit
 }: {
   value: string | undefined
   defaultPattern: string
   validate: (pattern: string) => FolderPatternError | null
   errorText: (err: FolderPatternError) => string
+  resetLabel: string
   onCommit: (pattern: string | undefined) => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
@@ -157,6 +160,10 @@ function PatternInput({
     setDraft(null)
     const p = draft.trim()
     onCommit(p === defaultPattern ? undefined : p)
+  }
+  const reset = (): void => {
+    setDraft(null)
+    onCommit(undefined)
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 260 }}>
@@ -179,7 +186,32 @@ function PatternInput({
           color: 'var(--text)'
         }}
       />
-      {error && <span style={{ fontSize: 11, color: 'var(--warn)' }}>{errorText(error)}</span>}
+      {(error || shown.trim() !== defaultPattern) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {error && (
+            <span style={{ flex: 1, fontSize: 11, color: 'var(--warn)' }}>{errorText(error)}</span>
+          )}
+          {shown.trim() !== defaultPattern && (
+            <span
+              role="button"
+              // Keep the input's blur from committing a half-typed value first.
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={reset}
+              title={defaultPattern}
+              style={{
+                marginLeft: 'auto',
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--accent)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {resetLabel}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -491,6 +523,7 @@ export function SettingsScreen() {
               defaultPattern={DEFAULT_CREATOR_FOLDER_PATTERN}
               validate={validateCreatorFolderPattern}
               errorText={patternError}
+              resetLabel={L.folderReset}
               onCommit={setCreatorPattern}
             />
           </Setting>
@@ -500,6 +533,7 @@ export function SettingsScreen() {
               defaultPattern={DEFAULT_POST_FOLDER_PATTERN}
               validate={validatePostFolderPattern}
               errorText={patternError}
+              resetLabel={L.folderReset}
               onCommit={setPostPattern}
             />
           </Setting>
