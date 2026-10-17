@@ -1,5 +1,5 @@
 /* fc-downloader — settings: cookies/account, storage, general */
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   DEFAULT_CREATOR_FOLDER_PATTERN,
   DEFAULT_POST_FOLDER_PATTERN,
@@ -135,7 +135,8 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
  * A folder-name pattern field that commits on blur / Enter. An invalid entry is
  * kept for editing (with the reason shown) and not saved; committing the
  * default clears the setting. "Reset" (shown only off the default) clears it
- * too, so the default never has to be retyped.
+ * too, so the default never has to be retyped — and it types the default in as
+ * an ordinary edit, so Ctrl+Z brings the previous pattern back.
  */
 function PatternInput({
   value,
@@ -153,6 +154,7 @@ function PatternInput({
   onCommit: (pattern: string | undefined) => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const shown = draft ?? value ?? defaultPattern
   const error = validate(shown)
   const commit = (): void => {
@@ -162,12 +164,25 @@ function PatternInput({
     onCommit(p === defaultPattern ? undefined : p)
   }
   const reset = (): void => {
+    // Replace the text through the browser's editing command rather than by
+    // setting the value: an edit made that way joins the undo history, so the
+    // previous pattern is one Ctrl+Z away (a scripted value change can't be
+    // undone). The setting is saved right away, as a commit would.
+    // (execCommand is deprecated but still the only way to make an undoable
+    // edit; if it does nothing, the reset below still applies.)
+    const el = inputRef.current
+    if (el) {
+      el.focus()
+      el.select()
+      document.execCommand('insertText', false, defaultPattern)
+    }
     setDraft(null)
     onCommit(undefined)
   }
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 260 }}>
       <input
+        ref={inputRef}
         type="text"
         spellCheck={false}
         value={shown}
